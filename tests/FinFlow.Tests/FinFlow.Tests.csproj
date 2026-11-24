@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\src\FinFlow.Audit.Api\FinFlow.Audit.Api.csproj" Aliases="AuditApi" />
     <ProjectReference Include="..\..\src\FinFlow.Ledger.Api\FinFlow.Ledger.Api.csproj" />
     <ProjectReference Include="..\..\src\FinFlow.Notifications.Worker\FinFlow.Notifications.Worker.csproj" />
+    <ProjectReference Include="..\..\src\FinFlow.Payments.Api\FinFlow.Payments.Api.csproj" Aliases="PaymentsApi" />
   </ItemGroup>
 
 </Project>

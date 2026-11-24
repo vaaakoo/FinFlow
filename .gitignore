@@ -12,4 +12,10 @@ frontend/dist/
 frontend/.angular/
 .tools/
 BenchmarkDotNet.Artifacts/
+*.trx
+*.pfx
+*.p12
+*.pem
+*.key
+kubeconfig.local
 

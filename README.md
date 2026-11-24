@@ -1,4 +1,4 @@
-# FinFlow v0.1
+# FinFlow
 
 FinFlow is an MIT-licensed .NET 10 portfolio project for simulated GEL banking. The secured mode includes customer and staff portals, transfers, payment settlement and refunds, notifications, and auditing. The original transfer demo remains available on loopback.
 
@@ -6,14 +6,83 @@ See the [implementation guide](docs/IMPLEMENTATION_GUIDE.md), [current architect
 
 ## Architecture
 
+The secured local stack uses one PostgreSQL instance with a separate database for each business service. The gateway routes HTTP and SignalR traffic. Transfers and Payments call private Ledger gRPC endpoints with service-account tokens. RabbitMQ delivers committed events to the notification and audit consumers.
+
+```mermaid
+flowchart LR
+    Browser[Browser] --> Portal[Angular portal]
+    Browser -->|OIDC with PKCE| Identity[Keycloak]
+    Portal -->|HTTP and SignalR| Gateway[YARP gateway]
+    Gateway --> Customers[Customers API]
+    Gateway --> Transfers[Transfers API]
+    Gateway --> Payments[Payments API]
+    Gateway --> Ledger[Ledger API]
+    Gateway --> Notifications[Notifications Worker]
+    Gateway --> Audit[Audit API]
+    Transfers -->|gRPC posting| Ledger
+    Payments -->|gRPC charge and refund| Ledger
+    Customers --> Cache[(Valkey profile cache)]
+    Customers -->|Lifecycle outbox| Broker[RabbitMQ]
+    Transfers -->|Lifecycle outbox| Broker
+    Payments -->|Lifecycle outbox| Broker
+    Ledger -->|Posting outbox| Broker
+    Broker --> Notifications
+    Broker --> Audit
+    Notifications -->|Synthetic email| Mailpit
+    Customers --> Postgres[(PostgreSQL)]
+    Transfers --> Postgres
+    Payments --> Postgres
+    Ledger --> Postgres
+    Notifications --> Postgres
+    Audit --> Postgres
+```
+
 | Application | PostgreSQL database | Responsibilities |
 | --- | --- | --- |
-| `FinFlow.Ledger.Api` | `finflow_ledger` | ASP.NET Core HTTP API, accounts, transfers, signed ledger entries, and the outbox publisher |
-| `FinFlow.Notifications.Worker` | `finflow_notifications` | RabbitMQ consumer, persisted recipient notifications, and processed-event IDs |
+| `FinFlow.Gateway` | — | External HTTP and SignalR entry point, route authorization, rate limits, and correlation IDs |
+| `FinFlow.Customers.Api` | `finflow_customers` | Customer profiles, simulated KYC, staff customer management, and cache-aside reads |
+| `FinFlow.Ledger.Api` | `finflow_ledger` | Account ownership, balances, immutable double-entry postings, statements, and reconciliation |
+| `FinFlow.Transfers.Api` | `finflow_transfers` | Customer transfer orders, asynchronous posting, retries, and transfer history |
+| `FinFlow.Payments.Api` | `finflow_payments` | Simulated settlement, refunds, compensation, and versioned payment events |
+| `FinFlow.Notifications.Worker` | `finflow_notifications` | Deduplicated notifications, read state, SignalR updates, and synthetic email |
+| `FinFlow.Audit.Api` | `finflow_audit` | Append-only transfer and workflow audit records, with access restricted by role |
+| `frontend` | — | Angular views for customers, staff, and auditors |
 
-The ledger locks both account rows in PostgreSQL ID order before checking funds. One EF Core transaction writes both balances, the transfer, a negative source entry, a positive destination entry, and a `TransferCompleted` outbox event. A transaction-scoped PostgreSQL advisory lock serializes requests for the same idempotency key. A unique index also enforces key uniqueness.
+Shared projects provide JWT configuration, gRPC contracts, RabbitMQ topology and publishing, and telemetry. [The solution](FinFlow.slnx) also includes integration tests, benchmarks, and an Aspire AppHost.
 
-The publisher sends the stored payload as a persistent message to a durable RabbitMQ queue. It marks the event published after a successful broker confirmation and retries pending events after failure. A lost confirmation or an interrupted outbox update can cause redelivery. The worker inserts the event ID and notification in one database transaction, then acknowledges the delivery. The event ID is a primary key, so processing the same delivery again creates a single notification.
+## Technology stack
+
+| Area | Tools |
+| --- | --- |
+| API and data | .NET 10, ASP.NET Core, PostgreSQL, EF Core, Dapper, gRPC |
+| Messaging and resilience | RabbitMQ, Valkey, Polly, SignalR, Mailpit |
+| Identity and UI | Keycloak, OIDC with PKCE, JWT, YARP, Angular, TypeScript |
+| Observability | Serilog, OpenTelemetry Collector, Prometheus, Grafana, Loki, Tempo |
+| Delivery and testing | Docker Compose, Aspire, Kubernetes on kind, Woodpecker CI, xUnit, Testcontainers, BenchmarkDotNet, k6 |
+
+## Implemented patterns
+
+- **Double-entry ledger and idempotency.** PostgreSQL locks the scoped request key and both accounts. Balances, signed entries, and the transfer outbox event commit together.
+- **Transactional outbox and consumer deduplication.** Publishers wait for RabbitMQ confirmation. Consumers persist results before acknowledgment and deduplicate by event ID. Malformed notification and audit deliveries can be preserved in dead-letter queues.
+- **Durable Saga and payment event sourcing.** Ordered replay reconstructs the request, status, posting IDs, and retry timing. The worker and refund handler use replayed state. The mutable row supports scheduling and list queries. Version checks guard appends, and Ledger uses separate stable posting keys for charges and reversals.
+- **Resilience and read models.** Polly retries selected transient Ledger errors and provides a circuit breaker. Persisted scheduling covers longer interruptions. Valkey caches customer profile reads. Dapper serves ledger statements and reconciliation.
+
+## Screenshots
+
+| Customer portal | Staff operations |
+| --- | --- |
+| ![FinFlow customer account balances](docs/screenshots/customer.png) | ![FinFlow staff reconciliation and account operations](docs/screenshots/operations.png) |
+
+## Verification status
+
+| Scope | Evidence |
+| --- | --- |
+| Ledger and messaging | The earlier integration suite passed 9 tests. Both delivery tests that failed during a later interrupted run passed when rerun individually. |
+| Secured demo | Earlier smoke runs covered sign-in, role and ownership checks, transfers, payment settlement and compensation, refunds, audit, SignalR, and Mailpit. |
+| Payment event sourcing | Four focused Release tests passed without infrastructure. EF generated the upgrade SQL and found no pending model changes. |
+| Frontend and telemetry | The patched Angular build passed and its production npm audit reported zero vulnerabilities. Browser smoke passed on the earlier bundle. A transfer trace was verified across five services, with Loki logs and a Prometheus ledger metric. |
+
+**Deferred validation.** Apply the payment stream backfill to PostgreSQL and rerun the secured payment and refund flows. Browser smoke on the patched bundle, a dedicated Valkey outage and Polly breaker check, Aspire gateway readiness, Kubernetes workloads, and Woodpecker execution remain open. Aspire reached its dashboard and kind started its control plane. See [project status](PROJECT_STATUS.md) for details.
 
 ## Start the demo
 
@@ -120,8 +189,6 @@ docker compose -p finflow-secure -f compose.yaml -f compose.secure.yaml up --bui
 
 Open [the Angular portal](http://localhost:4200). Sign in as `customer` to register a profile. Sign in as `operator` to verify that profile, open a GEL account for its subject, and fund it from a seeded demo account. The customer can then submit transfers and simulated payments, request refunds, read statements, and receive notifications. Sign in as `auditor` to view workflow events. Captured synthetic email is available in [Mailpit](http://localhost:8025).
 
-[Customer portal screenshot](docs/screenshots/customer.png) · [Staff operations screenshot](docs/screenshots/operations.png)
-
 YARP listens on loopback port 8081. Keycloak listens at `http://localhost:8082` and imports the `finflow` realm. The secured configuration uses a public `finflow-portal` client and Authorization Code with S256 PKCE. Synthetic usernames are `customer`, `admin`, `operator`, and `auditor`, with the local demo password `finflow-local-demo`. You can override these ports and the shared synthetic password using `.env`.
 
 Administrator and BankOperator roles can access the original ledger routes. Customers can view accounts that staff provisioned for their identity, read their statements, and submit transfers from those accounts. The ledger validates JWTs independently and has no published host port in this mode. The base Compose demo commands above use a separate project and remain available.
@@ -136,9 +203,13 @@ Administrator and BankOperator roles can access the original ledger routes. Cust
 | `GET /customers/me/accounts`, `GET /customers/me/accounts/{id}/statement` | Customers list their accounts and read a statement for an account they own. |
 | `POST /customers/me/transfers` | Customers submit a transfer with the fields from the v0.1 demo and an `Idempotency-Key`. Returns `202` and a status URL. |
 | `GET /customers/me/transfers/{id}`, `GET /customers/me/transfers?size=25` | Customers read the outcome or browse their transfer history. Use the returned `next` value as `before`. |
+| `POST /customers/me/payments`, `GET /customers/me/payments/{id}` | Customers submit a simulated payment with `accountId`, `amountMinor`, `scenario`, and an `Idempotency-Key` header, then poll its status. |
+| `POST /customers/me/payments/{id}/refund` | Customers request a refund for an owned settled payment. |
+| `GET /customers/me/notifications`, `PUT /customers/me/notifications/{id}/read` | Customers read notification history and mark items as read. |
 | `GET /accounts/{id}/statement?size=25` | Staff read a signed ledger statement. Pass the returned `beforeId` and `beforeTime` cursor values to fetch the next page. |
 | `GET /staff/ledger/reconciliation` | Staff check the transfer and invalid-posting counts. |
 | `GET /staff/audit/transfers?transferId={id}` | Auditors and administrators read transfer completion audit entries. Use `size` and the returned `next` value as `before` for pagination. |
+| `GET /staff/audit/workflows?entityId={id}` | Auditors and administrators read customer, transfer, and payment lifecycle events. |
 
 The Transfer API persists orders in `finflow_transfers`. Its worker retries the same order ID when the ledger call fails or its outcome is uncertain. The internal gRPC endpoint requires a Keycloak service-account token. The ledger rechecks source ownership and posts atomically. New accounts start at zero. Staff can fund a demo account using the original transfer endpoint.
 
@@ -152,7 +223,21 @@ node --env-file-if-exists=.env tests/smoke-secure.mjs
 
 To include a temporary ledger outage in the smoke check, set `FINFLOW_SMOKE_COMPOSE_PROJECT=finflow-secure` in your shell before running it against that local Compose project. The script stops and restarts the ledger and checks that a pending transfer posts once.
 
-Keycloak imports the realm on first startup. For a local stack created before the transfer service account was added, recreate the Keycloak container or use a new Compose project to load the updated realm.
+Keycloak imports the realm on first startup. If a local stack predates the transfer or payment service account, use a fresh Compose project to load the updated realm. Stop the secured stack when finished:
+
+```sh
+docker compose -p finflow-secure -f compose.yaml -f compose.secure.yaml stop
+```
+
+## Payment event sourcing
+
+Payment requests, Saga transitions, and retry schedules are recorded in a versioned payment event stream. The worker and refund handler replay the stream before making decisions. The payment row supports scheduling and list queries, and Ledger uses stable posting keys for charges and reversals. The focused replay tests run without Docker:
+
+```sh
+dotnet test tests/FinFlow.Tests/FinFlow.Tests.csproj -c Release --filter FullyQualifiedName~PaymentStreamTests
+```
+
+Live PostgreSQL migration and secured payment smoke checks for this update are pending. See the [implementation guide](docs/IMPLEMENTATION_GUIDE.md) for the event and projection write path.
 
 ## Observability, performance, and deployment
 

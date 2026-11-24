@@ -48,12 +48,21 @@ public static class PaymentEndpoints
             """, token);
         if (inserted == 1)
         {
-            db.Events.Add(new PaymentEvent(id, 1, PaymentStatus.Pending, now, null, null, null));
+            db.Events.Add(new PaymentEvent(id, 1, PaymentStatus.Pending, now, null, null, null)
+            {
+                Subject = subject, RequestKey = key, AccountId = input.AccountId,
+                AmountMinor = input.AmountMinor, Scenario = input.Scenario, NextAttempt = now
+            });
             db.Add(LifecycleOutbox.Create("payment.requested", id.ToString()));
             await db.SaveChangesAsync(token);
         }
 
-        var payment = await db.Payments.AsNoTracking().SingleAsync(p => p.Subject == subject && p.Key == key, token);
+        var paymentId = await db.Payments.Where(p => p.Subject == subject && p.Key == key)
+            .Select(p => p.Id).SingleAsync(token);
+        var payment = await db.ReplayAsync(paymentId, token)
+            ?? throw new InvalidOperationException("Payment is missing its event stream.");
+        if (payment.Subject != subject || payment.Key != key)
+            throw new InvalidOperationException("Payment lookup does not match its event stream.");
         if (payment.AccountId != input.AccountId || payment.AmountMinor != input.AmountMinor || payment.Scenario != input.Scenario)
             return Results.Problem(statusCode: 409, detail: "Idempotency key was used with a different payment.");
 
@@ -64,16 +73,10 @@ public static class PaymentEndpoints
     public static async Task<IResult> Get(Guid id, ClaimsPrincipal user, PaymentsDb db, CancellationToken token)
     {
         var subject = user.FindFirst("sub")!.Value;
-        var payment = await db.Payments.AsNoTracking().SingleOrDefaultAsync(p => p.Id == id && p.Subject == subject, token);
-        if (payment is null)
+        var payment = await db.ReplayAsync(id, token);
+        if (payment is null || payment.Subject != subject)
             return Results.NotFound();
-        var latest = await db.Events.AsNoTracking().Where(item => item.PaymentId == id)
-            .OrderByDescending(item => item.Version).FirstAsync(token);
-        var view = payment.ToView() with
-        {
-            Status = latest.Status.ToString(), ChargeId = latest.ChargeId, RefundId = latest.RefundId, Reason = latest.Reason
-        };
-        return Results.Ok(view);
+        return Results.Ok(payment.ToView());
     }
 
     public static async Task<IResult> List(int? page, ClaimsPrincipal user, PaymentsDb db, CancellationToken token)
@@ -96,15 +99,20 @@ public static class PaymentEndpoints
         var rows = await db.Payments.FromSqlInterpolated($"""
             SELECT * FROM "Payments" WHERE "Id" = {id} AND "Subject" = {subject} FOR UPDATE
             """).ToListAsync(token);
-        var payment = rows.SingleOrDefault();
-        if (payment is null)
+        var projection = rows.SingleOrDefault();
+        if (projection is null)
+            return Results.NotFound();
+        var payment = await db.ReplayForWriteAsync(projection, token);
+        if (payment.Subject != subject)
             return Results.NotFound();
         if (payment.Status is PaymentStatus.RefundPending or PaymentStatus.Refunded)
             return Accepted(payment);
         if (payment.Status != PaymentStatus.Settled && payment.Status != PaymentStatus.RefundRejected)
             return Results.Problem(statusCode: 409, detail: "Only settled payments can be refunded.");
 
+        var expectedVersion = payment.Version;
         payment.MoveTo(db, PaymentStatus.RefundPending);
+        projection.UpdateProjection(payment, expectedVersion);
         await db.SaveChangesAsync(token);
         await transaction.CommitAsync(token);
         return Accepted(payment);

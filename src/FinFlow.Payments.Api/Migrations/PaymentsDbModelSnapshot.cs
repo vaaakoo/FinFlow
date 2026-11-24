@@ -99,6 +99,7 @@ namespace FinFlow.Payments.Api.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
@@ -119,8 +120,20 @@ namespace FinFlow.Payments.Api.Migrations
                     b.Property<int>("Version")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("AmountMinor")
+                        .HasColumnType("bigint");
+
                     b.Property<Guid?>("ChargeId")
                         .HasColumnType("uuid");
+
+                    b.Property<int>("FailedAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("NextAttempt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset>("OccurredAt")
                         .HasColumnType("timestamp with time zone");
@@ -131,8 +144,17 @@ namespace FinFlow.Payments.Api.Migrations
                     b.Property<Guid?>("RefundId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("RequestKey")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Scenario")
+                        .HasColumnType("text");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Subject")
+                        .HasColumnType("text");
 
                     b.HasKey("PaymentId", "Version");
 

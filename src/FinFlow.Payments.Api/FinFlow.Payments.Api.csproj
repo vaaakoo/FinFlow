@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
+    <InternalsVisibleTo Include="FinFlow.Tests" />
     <ProjectReference Include="../FinFlow.Observability/FinFlow.Observability.csproj" />
     <ProjectReference Include="../FinFlow.Messaging/FinFlow.Messaging.csproj" />
     <ProjectReference Include="../FinFlow.Authentication/FinFlow.Authentication.csproj" />

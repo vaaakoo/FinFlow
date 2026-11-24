@@ -76,8 +76,9 @@ public sealed class PaymentWorker : BackgroundService
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<PaymentsDb>();
         await using var transaction = await db.Database.BeginTransactionAsync(token);
+        var now = DateTimeOffset.UtcNow;
         var due = await db.Payments.FromSqlInterpolated($"""
-            SELECT * FROM "Payments" WHERE "NextAttempt" <= {DateTimeOffset.UtcNow}
+            SELECT * FROM "Payments" WHERE "NextAttempt" <= {now}
                 AND "Status" IN ({(int)PaymentStatus.Pending}, {(int)PaymentStatus.Charged},
                     {(int)PaymentStatus.CompensationPending}, {(int)PaymentStatus.RefundPending})
             ORDER BY "NextAttempt", "Id" LIMIT 1 FOR UPDATE SKIP LOCKED
@@ -85,7 +86,13 @@ public sealed class PaymentWorker : BackgroundService
         if (due.Count == 0)
             return false;
 
-        var payment = due[0];
+        var projection = due[0];
+        var payment = await db.ReplayForWriteAsync(projection, token);
+        if (payment.NextAttempt > now || payment.Status is not (PaymentStatus.Pending or PaymentStatus.Charged
+            or PaymentStatus.CompensationPending or PaymentStatus.RefundPending))
+            throw new InvalidOperationException("Payment scheduling projection does not match its event stream.");
+
+        var expectedVersion = payment.Version;
         var previousStatus = payment.Status;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
         timeout.CancelAfter(TimeSpan.FromSeconds(8));
@@ -95,12 +102,12 @@ public sealed class PaymentWorker : BackgroundService
         }
         catch (Exception exception) when (!token.IsCancellationRequested)
         {
-            payment.FailedAttempts = Math.Min(payment.FailedAttempts + 1, 8);
-            payment.NextAttempt = DateTimeOffset.UtcNow.AddSeconds(Math.Min(60, Math.Pow(2, payment.FailedAttempts)));
+            payment.ScheduleRetry(db, DateTimeOffset.UtcNow);
             logger.LogWarning("Payment {PaymentId} in {Status} will retry after {FailureType}.",
                 payment.Id, payment.Status, exception.GetType().Name);
         }
 
+        projection.UpdateProjection(payment, expectedVersion);
         await db.SaveChangesAsync(token);
         await transaction.CommitAsync(token);
         if (previousStatus != PaymentStatus.Settled && payment.Status == PaymentStatus.Settled)
