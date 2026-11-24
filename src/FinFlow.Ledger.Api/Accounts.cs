@@ -6,7 +6,8 @@ namespace FinFlow.Ledger.Api;
 public static class Accounts
 {
     public static Task<List<AccountView>> List(LedgerDb db, CancellationToken token) =>
-        db.Accounts.AsNoTracking().OrderBy(account => account.Id)
+        db.Accounts.AsNoTracking().Where(account => account.Id != LedgerDb.PaymentSettlement)
+            .OrderBy(account => account.Id)
             .Select(account => new AccountView(account.Id, account.Name, account.Balance, "GEL"))
             .ToListAsync(token);
 

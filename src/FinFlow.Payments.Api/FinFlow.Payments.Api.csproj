@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../FinFlow.Observability/FinFlow.Observability.csproj" />
+    <ProjectReference Include="../FinFlow.Messaging/FinFlow.Messaging.csproj" />
+    <ProjectReference Include="../FinFlow.Authentication/FinFlow.Authentication.csproj" />
+    <ProjectReference Include="../FinFlow.Ledger.Contracts/FinFlow.Ledger.Contracts.csproj" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Polly.Core" />
+  </ItemGroup>
+</Project>

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
+    <ProjectReference Include="../FinFlow.Observability/FinFlow.Observability.csproj" />
     <PackageReference Include="Dapper" />
     <PackageReference Include="Grpc.AspNetCore.Server" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">

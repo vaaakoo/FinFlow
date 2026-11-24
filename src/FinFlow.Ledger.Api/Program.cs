@@ -1,16 +1,18 @@
 using FinFlow.Messaging;
 using FinFlow.Ledger.Api;
 using FinFlow.Authentication;
+using FinFlow.Observability;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+FinFlowTelemetry.Configure(builder, "ledger");
 var secured = builder.Configuration.GetValue<bool>("Identity:Enabled");
 if (secured)
 {
     builder.Services.AddFinFlowIdentity(builder.Configuration);
     builder.Services.AddGrpc();
 }
-builder.Services.AddHealthChecks();
+FinFlowTelemetry.AddDatabaseReadiness<LedgerDb>(builder.Services);
 builder.Services.AddDbContext<LedgerDb>(options => options.UseNpgsql(
     builder.Configuration.GetConnectionString("Ledger")
     ?? throw new InvalidOperationException("Configure ConnectionStrings:Ledger.")));
@@ -31,7 +33,7 @@ if (secured)
     ledger.RequireAuthorization(FinFlowIdentity.StaffPolicy);
 }
 
-app.MapHealthChecks("/health/live");
+FinFlowTelemetry.MapHealthEndpoints(app);
 ledger.MapGet("/accounts", Accounts.List);
 ledger.MapGet("/transfers/{id:guid}", Transfers.Get);
 ledger.MapPost("/transfers", Transfers.Create);
@@ -43,7 +45,7 @@ if (secured)
     var owned = app.MapGroup("/customers/me/accounts").RequireAuthorization(FinFlowIdentity.CustomerPolicy);
     owned.MapGet("", Accounts.ListOwned);
     owned.MapGet("/{accountId:guid}/statement", LedgerQueries.OwnStatement);
-    app.MapGrpcService<LedgerPostingService>().RequireAuthorization(FinFlowIdentity.LedgerPosterPolicy);
+    app.MapGrpcService<LedgerPostingService>().RequireAuthorization();
 }
 app.Run();
 

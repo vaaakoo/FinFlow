@@ -1,6 +1,6 @@
 # FinFlow v0.1
 
-FinFlow is an MIT-licensed .NET 10 portfolio project that simulates a GEL bank transfer and delivers a persisted notification. The original local demo uses synthetic data and binds its unauthenticated API to loopback. A separate Compose mode adds Keycloak and an authenticated YARP gateway.
+FinFlow is an MIT-licensed .NET 10 portfolio project for simulated GEL banking. The secured mode includes customer and staff portals, transfers, payment settlement and refunds, notifications, and auditing. The original transfer demo remains available on loopback.
 
 See the [current architecture](docs/architecture/current.md), [six-stage roadmap](PROJECT_PLAN.md), and [project status](PROJECT_STATUS.md).
 
@@ -16,6 +16,20 @@ The ledger locks both account rows in PostgreSQL ID order before checking funds.
 The publisher sends the stored payload as a persistent message to a durable RabbitMQ queue. It marks the event published after a successful broker confirmation and retries pending events after failure. A lost confirmation or an interrupted outbox update can cause redelivery. The worker inserts the event ID and notification in one database transaction, then acknowledges the delivery. The event ID is a primary key, so processing the same delivery again creates a single notification.
 
 ## Start the demo
+
+For a laptop session focused on balances and transfers, start only PostgreSQL and the Ledger API:
+
+```sh
+docker compose up -d --build ledger
+```
+
+Events remain in the outbox. Start RabbitMQ and the notification worker only when you want to see delivery:
+
+```sh
+docker compose up -d rabbitmq notifications
+```
+
+Use `docker compose stop` when you finish. Run one local stack at a time. The secured portal, observability overlay, Aspire, and kind are separate development options.
 
 With Docker Engine running in Linux-container mode and the Docker Compose plugin available, run this from the repository root.
 
@@ -104,6 +118,10 @@ The xUnit suite provisions real PostgreSQL and RabbitMQ containers with Testcont
 docker compose -p finflow-secure -f compose.yaml -f compose.secure.yaml up --build
 ```
 
+Open [the Angular portal](http://localhost:4200). Sign in as `customer` to register a profile. Sign in as `operator` to verify that profile, open a GEL account for its subject, and fund it from a seeded demo account. The customer can then submit transfers and simulated payments, request refunds, read statements, and receive notifications. Sign in as `auditor` to view workflow events. Captured synthetic email is available in [Mailpit](http://localhost:8025).
+
+[Customer portal screenshot](docs/screenshots/customer.png) · [Staff operations screenshot](docs/screenshots/operations.png)
+
 YARP listens on loopback port 8081. Keycloak listens at `http://localhost:8082` and imports the `finflow` realm. The secured configuration uses a public `finflow-portal` client and Authorization Code with S256 PKCE. Synthetic usernames are `customer`, `admin`, `operator`, and `auditor`, with the local demo password `finflow-local-demo`. You can override these ports and the shared synthetic password using `.env`.
 
 Administrator and BankOperator roles can access the original ledger routes. Customers can view accounts that staff provisioned for their identity, read their statements, and submit transfers from those accounts. The ledger validates JWTs independently and has no published host port in this mode. The base Compose demo commands above use a separate project and remain available.
@@ -135,4 +153,12 @@ node --env-file-if-exists=.env tests/smoke-secure.mjs
 To include a temporary ledger outage in the smoke check, set `FINFLOW_SMOKE_COMPOSE_PROJECT=finflow-secure` in your shell before running it against that local Compose project. The script stops and restarts the ledger and checks that a pending transfer posts once.
 
 Keycloak imports the realm on first startup. For a local stack created before the transfer service account was added, recreate the Keycloak container or use a new Compose project to load the updated realm.
+
+## Observability, performance, and deployment
+
+```sh
+docker compose -p finflow-secure -f compose.yaml -f compose.secure.yaml -f compose.observability.yaml up --build
+```
+
+Open [Grafana](http://localhost:3000) and select **FinFlow workflows**. Use Explore with Tempo for request traces or Loki for structured logs. See [measured performance](docs/benchmarks/results.md) and [local deployment instructions](docs/DEPLOYMENT.md) for Aspire, Kubernetes, and Woodpecker.
 

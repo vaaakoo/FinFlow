@@ -1,5 +1,8 @@
+using System.Diagnostics;
 using System.Text.Json;
 using FinFlow.Messaging;
+using FinFlow.Observability;
+using Microsoft.AspNetCore.SignalR;
 using RabbitMQ.Client;
 
 namespace FinFlow.Notifications.Worker;
@@ -9,14 +12,17 @@ public sealed class NotificationConsumer : BackgroundService
     private readonly IServiceScopeFactory scopes;
     private readonly ConnectionFactory broker;
     private readonly ILogger<NotificationConsumer> logger;
+    private readonly IHubContext<NotificationHub> hub;
 
     public NotificationConsumer(IServiceScopeFactory scopes,
         ConnectionFactory broker,
+        IHubContext<NotificationHub> hub,
         ILogger<NotificationConsumer> logger)
     {
         this.scopes = scopes;
         this.broker = broker;
         this.logger = logger;
+        this.hub = hub;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -78,9 +84,24 @@ public sealed class NotificationConsumer : BackgroundService
             }
 
             await using var scope = scopes.CreateAsyncScope();
+            using var activity = FinFlowTelemetry.Start("notification.consume", ActivityKind.Consumer,
+                RabbitTopology.ReadTraceParent(delivery.BasicProperties));
             var db = scope.ServiceProvider.GetRequiredService<NotificationsDb>();
-            await db.StoreAsync(message, stoppingToken);
+            var notification = await db.StoreAsync(message, stoppingToken);
             await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, stoppingToken);
+            if (notification?.RecipientSubject is string subject)
+            {
+                try
+                {
+                    await hub.Clients.User(subject).SendAsync("NotificationReceived",
+                        NotificationEndpoints.Entry(notification), stoppingToken);
+                }
+                catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+                {
+                    logger.LogWarning("Live notification {EventId} could not be sent ({FailureType}).",
+                        notification.EventId, ex.GetType().Name);
+                }
+            }
         }
     }
 

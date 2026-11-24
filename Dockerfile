@@ -21,13 +21,16 @@ RUN dotnet publish src/FinFlow.Transfers.Api -c Release -o /app /p:UseAppHost=fa
 FROM sdk AS audit-build
 RUN dotnet publish src/FinFlow.Audit.Api -c Release -o /app /p:UseAppHost=false
 
+FROM sdk AS payments-build
+RUN dotnet publish src/FinFlow.Payments.Api -c Release -o /app /p:UseAppHost=false
+
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS ledger
 WORKDIR /app
 COPY --from=ledger-build /app .
 USER $APP_UID
 ENTRYPOINT ["dotnet", "FinFlow.Ledger.Api.dll"]
 
-FROM mcr.microsoft.com/dotnet/runtime:10.0 AS worker
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS worker
 WORKDIR /app
 COPY --from=worker-build /app .
 USER $APP_UID
@@ -56,4 +59,10 @@ WORKDIR /app
 COPY --from=audit-build /app .
 USER $APP_UID
 ENTRYPOINT ["dotnet", "FinFlow.Audit.Api.dll"]
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS payments
+WORKDIR /app
+COPY --from=payments-build /app .
+USER $APP_UID
+ENTRYPOINT ["dotnet", "FinFlow.Payments.Api.dll"]
 

@@ -15,10 +15,11 @@ public sealed class NotificationsDb : DbContext
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Notification>().HasKey(n => n.EventId);
+        model.Entity<Notification>().HasIndex(n => new { n.RecipientSubject, n.CreatedAt });
         model.Entity<Notification>().HasOne<ProcessedEvent>().WithOne().HasForeignKey<Notification>(n => n.EventId);
     }
 
-    public async Task StoreAsync(TransferCompleted message, CancellationToken cancellationToken)
+    public async Task<Notification?> StoreAsync(TransferCompleted message, CancellationToken cancellationToken)
     {
         await using var transaction = await Database.BeginTransactionAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
@@ -27,18 +28,27 @@ public sealed class NotificationsDb : DbContext
             ON CONFLICT ("Id") DO NOTHING
             """, cancellationToken);
 
+        Notification? notification = null;
         if (inserted == 1)
         {
-            Notifications.Add(new Notification(message.EventId, message.TransferId, message.DestinationAccountId,
-                message.AmountMinor, message.Currency, now));
+            notification = new Notification(message.EventId, message.TransferId, message.DestinationAccountId,
+                message.AmountMinor, message.Currency, now) { RecipientSubject = message.RecipientSubject };
+            Notifications.Add(notification);
             await SaveChangesAsync(cancellationToken);
         }
 
         await transaction.CommitAsync(cancellationToken);
+        return notification;
     }
 }
 
 public sealed record ProcessedEvent(Guid Id, DateTimeOffset ProcessedAt);
 public sealed record Notification(Guid EventId, Guid TransferId, Guid RecipientAccountId,
-    long AmountMinor, string Currency, DateTimeOffset CreatedAt);
+    long AmountMinor, string Currency, DateTimeOffset CreatedAt)
+{
+    public string? RecipientSubject { get; init; }
+    public DateTimeOffset? ReadAt { get; set; }
+    public DateTimeOffset? EmailSentAt { get; set; }
+    public DateTimeOffset? EmailRetryAt { get; set; }
+}
 

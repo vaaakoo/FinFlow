@@ -1,9 +1,13 @@
 using System.Diagnostics;
 using System.Threading.RateLimiting;
 using FinFlow.Authentication;
+using FinFlow.Observability;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddFinFlowIdentity(builder.Configuration);
+FinFlowTelemetry.Configure(builder, "gateway");
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+builder.Logging.AddFilter("Yarp.ReverseProxy.Forwarder.HttpForwarder", LogLevel.Warning);
+builder.Services.AddFinFlowIdentity(builder.Configuration, allowNotificationsHubToken: true);
 builder.Services.AddHealthChecks();
 builder.Services.AddProblemDetails();
 builder.Services.AddRateLimiter(options =>
@@ -39,6 +43,6 @@ app.Use(async (context, next) =>
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
-app.MapHealthChecks("/health/live");
+FinFlowTelemetry.MapHealthEndpoints(app);
 app.MapReverseProxy();
 app.Run();

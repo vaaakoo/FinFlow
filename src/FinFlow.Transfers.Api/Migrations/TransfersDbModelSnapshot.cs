@@ -22,6 +22,37 @@ namespace FinFlow.Transfers.Api.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("FinFlow.Messaging.LifecycleOutbox", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CorrelationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("EntityId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OccurredAt")
+                        .HasFilter(" \"PublishedAt\" IS NULL ");
+
+                    b.ToTable("LifecycleOutbox");
+                });
+
             modelBuilder.Entity("FinFlow.Transfers.Api.TransferOrder", b =>
                 {
                     b.Property<Guid>("Id")
@@ -66,6 +97,9 @@ namespace FinFlow.Transfers.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<string>("TraceParent")
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 

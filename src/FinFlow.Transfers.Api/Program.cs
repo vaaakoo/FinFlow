@@ -1,13 +1,21 @@
 using FinFlow.Authentication;
+using FinFlow.Observability;
+using FinFlow.Messaging;
 using FinFlow.Ledger.Contracts;
 using FinFlow.Transfers.Api;
 using Grpc.Net.Client;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+FinFlowTelemetry.Configure(builder, "transfers");
 builder.Services.AddFinFlowIdentity(builder.Configuration);
+if (builder.Configuration["RabbitMq:Uri"] is string rabbitUri)
+{
+    builder.Services.AddSingleton(RabbitTopology.CreateFactory(rabbitUri));
+    builder.Services.AddHostedService<LifecyclePublisher<TransfersDb>>();
+}
 builder.Services.AddProblemDetails();
-builder.Services.AddHealthChecks();
+FinFlowTelemetry.AddDatabaseReadiness<TransfersDb>(builder.Services);
 builder.Services.AddHttpClient();
 builder.Services.AddDbContext<TransfersDb>(options => options.UseNpgsql(
     builder.Configuration.GetConnectionString("Transfers")
@@ -27,10 +35,11 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapHealthChecks("/health/live");
+FinFlowTelemetry.MapHealthEndpoints(app);
 var transfers = app.MapGroup("/customers/me/transfers").RequireAuthorization(FinFlowIdentity.CustomerPolicy);
 transfers.MapPost("", TransferEndpoints.Submit);
 transfers.MapGet("", TransferEndpoints.List);
 transfers.MapGet("/{id:guid}", TransferEndpoints.Get);
+app.MapGet("/staff/transfers", TransferEndpoints.ListForStaff).RequireAuthorization(FinFlowIdentity.StaffPolicy);
 app.Run();
 

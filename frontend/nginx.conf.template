@@ -1,0 +1,23 @@
+map $http_upgrade $portal_connection {
+    default upgrade;
+    '' close;
+}
+server {
+    listen 8080;
+    root /usr/share/nginx/html;
+
+    location = /portal-config.json {
+        default_type application/json;
+        return 200 '{"identityPort":"${FINFLOW_IDENTITY_PORT}"}';
+    }
+    location /api/ {
+        proxy_pass http://gateway:8080/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $portal_connection;
+        proxy_read_timeout 120s;
+    }
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

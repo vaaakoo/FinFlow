@@ -60,6 +60,12 @@ namespace FinFlow.Ledger.Api.Migrations
                             Id = new Guid("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
                             Balance = 50000L,
                             Name = "Bob Demo"
+                        },
+                        new
+                        {
+                            Id = new Guid("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+                            Balance = 0L,
+                            Name = "Simulated payment settlement"
                         });
                 });
 
@@ -96,6 +102,9 @@ namespace FinFlow.Ledger.Api.Migrations
 
                     b.Property<DateTimeOffset?>("PublishedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TraceParent")
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 

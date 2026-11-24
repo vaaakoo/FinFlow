@@ -117,13 +117,52 @@ assert.equal(ownedStatement.status, 200);
 assert.deepEqual((await ownedStatement.json()).items, []);
 console.log('Staff provisioning and customer account-ownership checks passed.');
 
-const funding = await fetch(gateway + '/transfers', {
-    method: 'POST',
-    headers: { authorization: 'Bearer ' + operator, 'content-type': 'application/json',
-        'idempotency-key': 'smoke-fund-' + account.id },
-    body: JSON.stringify({ sourceAccountId: seedAccount, destinationAccountId: account.id, amountMinor: 500 })
+const socketAddress = gateway.replace(/^http/, 'ws') + '/customers/me/notifications/live?access_token='
+    + encodeURIComponent(customer);
+const socket = new WebSocket(socketAddress);
+const handshake = Promise.withResolvers();
+const liveNotification = Promise.withResolvers();
+socket.addEventListener('open', () => socket.send('{"protocol":"json","version":1}\u001e'));
+socket.addEventListener('message', event => {
+    for (const frame of event.data.split('\u001e').filter(Boolean)) {
+        const message = JSON.parse(frame);
+        if (message.type === undefined && !message.error) handshake.resolve();
+        if (message.target === 'NotificationReceived') liveNotification.resolve(message.arguments[0]);
+    }
 });
-assert.equal(funding.status, 201);
+const socketTimeout = setTimeout(() => {
+    handshake.reject(new Error('SignalR handshake was not received.'));
+    liveNotification.reject(new Error('Live notification was not received.'));
+    socket.close();
+}, 15000);
+liveNotification.promise.catch(() => {});
+
+try {
+    await handshake.promise;
+    const funding = await fetch(gateway + '/transfers', {
+        method: 'POST',
+        headers: { authorization: 'Bearer ' + operator, 'content-type': 'application/json',
+            'idempotency-key': 'smoke-fund-' + account.id },
+        body: JSON.stringify({ sourceAccountId: seedAccount, destinationAccountId: account.id, amountMinor: 500 })
+    });
+    assert.equal(funding.status, 201);
+    const postedFunding = await funding.json();
+    const live = await liveNotification.promise;
+    assert.equal(live.transferId, postedFunding.id);
+    assert.equal(live.recipientAccountId, account.id);
+    const historyResponse = await request('/customers/me/notifications', customer);
+    assert.equal(historyResponse.status, 200);
+    const entry = (await historyResponse.json()).find(item => item.eventId === live.eventId);
+    assert.ok(entry);
+    const readPath = '/customers/me/notifications/' + entry.eventId + '/read';
+    assert.equal((await request(readPath, customer, 'PUT')).status, 204);
+    const readHistory = await (await request('/customers/me/notifications', customer)).json();
+    assert.ok(readHistory.find(item => item.eventId === entry.eventId).readAt);
+    console.log('SignalR and owned notification history and read status passed.');
+} finally {
+    clearTimeout(socketTimeout);
+    socket.close();
+}
 
 const transferPath = '/customers/me/transfers';
 const transferKey = 'smoke-transfer-' + account.id;
@@ -149,6 +188,7 @@ async function awaitOrder(id) {
 const submitted = await Promise.all([
     submitTransfer(transferKey, transferBody), submitTransfer(transferKey, transferBody)
 ]);
+const transferTrace = submitted[0].headers.get('x-correlation-id');
 assert.ok(submitted.every(result => result.status === 202));
 const [order, replay] = await Promise.all(submitted.map(result => result.json()));
 assert.equal(replay.id, order.id);
@@ -170,6 +210,7 @@ assert.equal((await request(transferPath + '?size=1&before=' + page.next, custom
 const balances = await (await request('/customers/me/accounts', customer)).json();
 assert.equal(balances.find(item => item.id === account.id).balanceMinor, 350);
 console.log('Customer transfer, idempotent retry, foreign-account rejection, and transfer history passed.');
+if (transferTrace) console.log('Transfer correlation ID: ' + transferTrace);
 
 const auditPath = '/staff/audit/transfers?transferId=' + completed.postingId;
 assert.equal((await request(auditPath, customer)).status, 403);
@@ -190,6 +231,65 @@ assert.ok(auditItems[0].correlationId);
 assert.deepEqual(Object.keys(auditItems[0]).sort(),
     ['causationId', 'completedAt', 'correlationId', 'eventId', 'transferId']);
 console.log('Audit fan-out, role checks, and minimal audit payload passed.');
+
+const paymentsPath = '/customers/me/payments';
+async function submitPayment(scenario) {
+    const headers = {
+        authorization: 'Bearer ' + customer,
+        'content-type': 'application/json',
+        'idempotency-key': 'smoke-payment-' + account.id + '-' + scenario
+    };
+    const body = JSON.stringify({ accountId: account.id, amountMinor: 50, scenario });
+    const responses = await Promise.all([
+        fetch(gateway + paymentsPath, { method: 'POST', headers, body }),
+        fetch(gateway + paymentsPath, { method: 'POST', headers, body })
+    ]);
+    assert.ok(responses.every(result => result.status === 202));
+    const [payment, replay] = await Promise.all(responses.map(result => result.json()));
+    assert.equal(payment.id, replay.id);
+    return payment.id;
+}
+
+async function awaitPayment(id, status) {
+    for (let attempt = 0; attempt < 25; attempt++) {
+        const response = await request(paymentsPath + '/' + id, customer);
+        assert.equal(response.status, 200);
+        const payment = await response.json();
+        if (payment.status === status) return payment;
+        await delay(800);
+    }
+    throw new Error('Payment did not reach ' + status + ': ' + id);
+}
+
+for (const scenario of ['success', 'uncertain', 'duplicate']) {
+    const paymentId = await submitPayment(scenario);
+    const settled = await awaitPayment(paymentId, 'Settled');
+    assert.ok(settled.chargeId);
+    const refunds = await Promise.all([
+        request(paymentsPath + '/' + paymentId + '/refund', customer, 'POST'),
+        request(paymentsPath + '/' + paymentId + '/refund', customer, 'POST')
+    ]);
+    assert.ok(refunds.every(result => result.status === 202));
+    assert.ok((await awaitPayment(paymentId, 'Refunded')).refundId);
+}
+const declined = await awaitPayment(await submitPayment('decline'), 'Failed');
+assert.ok(declined.chargeId);
+assert.ok(declined.refundId);
+const afterPayments = await (await request('/customers/me/accounts', customer)).json();
+assert.equal(afterPayments.find(item => item.id === account.id).balanceMinor, 350);
+console.log('Payment settlement, uncertain outcome recovery, compensation, and concurrent refunds passed.');
+
+let workflowAudit = [];
+for (let attempt = 0; attempt < 20; attempt++) {
+    const response = await request('/staff/audit/workflows?entityId=' + declined.id, auditor);
+    assert.equal(response.status, 200);
+    workflowAudit = await response.json();
+    if (workflowAudit.some(item => item.kind === 'payment.failed')) break;
+    await delay(500);
+}
+assert.equal(workflowAudit.filter(item => item.kind === 'payment.failed').length, 1);
+assert.ok(workflowAudit.some(item => item.kind === 'payment.compensationpending'));
+console.log('Payment lifecycle outbox and audit projection passed.');
 
 if (process.env.FINFLOW_SMOKE_COMPOSE_PROJECT) {
     const project = process.env.FINFLOW_SMOKE_COMPOSE_PROJECT;

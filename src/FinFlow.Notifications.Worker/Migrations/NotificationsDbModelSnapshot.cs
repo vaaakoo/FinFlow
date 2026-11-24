@@ -37,13 +37,27 @@ namespace FinFlow.Notifications.Worker.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTimeOffset?>("EmailRetryAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EmailSentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ReadAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("RecipientAccountId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("RecipientSubject")
+                        .HasColumnType("text");
 
                     b.Property<Guid>("TransferId")
                         .HasColumnType("uuid");
 
                     b.HasKey("EventId");
+
+                    b.HasIndex("RecipientSubject", "CreatedAt");
 
                     b.ToTable("Notifications");
                 });

@@ -1,10 +1,31 @@
+using System.Diagnostics;
 using System.Security.Claims;
+using FinFlow.Messaging;
 using Microsoft.EntityFrameworkCore;
 
 namespace FinFlow.Transfers.Api;
 
 public static class TransferEndpoints
 {
+    public static async Task<IResult> ListForStaff(string? status, int? page, TransfersDb db, CancellationToken token)
+    {
+        var pageNumber = page ?? 1;
+        if (pageNumber is < 1 or > 1000)
+            return Results.Problem(statusCode: 400, detail: "Page must be between 1 and 1000.");
+
+        var query = db.Orders.AsNoTracking();
+        if (!string.IsNullOrEmpty(status))
+        {
+            if (!Enum.TryParse<OrderStatus>(status, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
+                return Results.Problem(statusCode: 400, detail: "Unknown transfer status.");
+            query = query.Where(order => order.Status == parsed);
+        }
+
+        var orders = await query.OrderByDescending(order => order.CreatedAt).ThenByDescending(order => order.Id)
+            .Skip((pageNumber - 1) * 25).Take(25).ToListAsync(token);
+        return Results.Ok(orders.Select(order => order.View()));
+    }
+
     public static async Task<IResult> Submit(HttpRequest http, ClaimsPrincipal user, TransferInput input,
         TransfersDb db, CancellationToken token)
     {
@@ -19,19 +40,26 @@ public static class TransferEndpoints
         var subject = user.FindFirst("sub")!.Value;
         var id = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        await db.Database.ExecuteSqlInterpolatedAsync($"""
+        await using var transaction = await db.Database.BeginTransactionAsync(token);
+        var inserted = await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "Orders" ("Id", "Subject", "Key", "SourceAccountId", "DestinationAccountId",
-                "AmountMinor", "CreatedAt", "Status", "Attempts", "NextAttempt")
+                "AmountMinor", "CreatedAt", "Status", "Attempts", "NextAttempt", "TraceParent")
             VALUES ({id}, {subject}, {key}, {input.SourceAccountId}, {input.DestinationAccountId},
-                {input.AmountMinor}, {now}, 'Pending', 0, {now})
+                {input.AmountMinor}, {now}, 'Pending', 0, {now}, {Activity.Current?.Id})
             ON CONFLICT ("Subject", "Key") DO NOTHING
             """, token);
+        if (inserted == 1)
+        {
+            db.Add(LifecycleOutbox.Create("transfer.requested", id.ToString()));
+            await db.SaveChangesAsync(token);
+        }
 
         var order = await db.Orders.AsNoTracking().SingleAsync(o => o.Subject == subject && o.Key == key, token);
         if (order.AmountMinor != input.AmountMinor || order.SourceAccountId != input.SourceAccountId
             || order.DestinationAccountId != input.DestinationAccountId)
             return Results.Problem(statusCode: 409, detail: "Idempotency key was used with another payload.");
 
+        await transaction.CommitAsync(token);
         return Results.Accepted($"/customers/me/transfers/{order.Id}", order.View());
     }
 

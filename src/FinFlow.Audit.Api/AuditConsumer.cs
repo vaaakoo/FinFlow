@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Text.Json;
 using FinFlow.Messaging;
+using FinFlow.Observability;
 using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client;
 
@@ -41,36 +43,97 @@ public sealed class AuditConsumer : BackgroundService
     private async Task ConsumeAsync(CancellationToken token)
     {
         await using var connection = await broker.CreateConnectionAsync(token);
-        await using var channel = await connection.CreateChannelAsync(cancellationToken: token);
+        var channelOptions = new CreateChannelOptions(
+            publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true);
+        await using var channel = await connection.CreateChannelAsync(channelOptions, token);
         await RabbitTopology.DeclareAuditQueueAsync(channel, token);
+        await RabbitTopology.DeclareLifecycleQueueAsync(channel, token);
 
         while (!token.IsCancellationRequested)
         {
-            var delivery = await channel.BasicGetAsync(RabbitTopology.AuditQueue, autoAck: false, token);
-            if (delivery is null)
-            {
+            var transfer = await channel.BasicGetAsync(RabbitTopology.AuditQueue, autoAck: false, token);
+            var lifecycle = await channel.BasicGetAsync(RabbitTopology.LifecycleAuditQueue, autoAck: false, token);
+            if (transfer is not null)
+                await ProcessTransferAsync(channel, transfer, token);
+            if (lifecycle is not null)
+                await ProcessLifecycleAsync(channel, lifecycle, token);
+            if (transfer is null && lifecycle is null)
                 await Task.Delay(TimeSpan.FromMilliseconds(250), token);
-                continue;
-            }
-
-            var message = ReadEvent(delivery);
-            if (message is null)
-            {
-                logger.LogWarning("Rejected malformed transfer audit event.");
-                await channel.BasicRejectAsync(delivery.DeliveryTag, requeue: false, token);
-                continue;
-            }
-
-            await using var scope = scopes.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<AuditDb>();
-            await db.Database.ExecuteSqlInterpolatedAsync($"""
-                INSERT INTO "TransferEvents" ("EventId", "TransferId", "CompletedAt", "CorrelationId", "CausationId")
-                VALUES ({message.EventId}, {message.TransferId}, {message.CompletedAt.ToUniversalTime()},
-                    {message.CorrelationId}, {message.CausationId})
-                ON CONFLICT ("EventId") DO NOTHING
-                """, token);
-            await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, token);
         }
+    }
+
+    private async Task ProcessTransferAsync(IChannel channel, BasicGetResult delivery, CancellationToken token)
+    {
+        using var activity = FinFlowTelemetry.Start("audit.consume", ActivityKind.Consumer,
+            RabbitTopology.ReadTraceParent(delivery.BasicProperties));
+        var message = ReadEvent(delivery);
+        if (message is null)
+        {
+            await DeadLetterAsync(channel, delivery, token);
+            return;
+        }
+
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuditDb>();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "TransferEvents" ("EventId", "TransferId", "CompletedAt", "CorrelationId", "CausationId")
+            VALUES ({message.EventId}, {message.TransferId}, {message.CompletedAt.ToUniversalTime()},
+                {message.CorrelationId}, {message.CausationId})
+            ON CONFLICT ("EventId") DO NOTHING
+            """, token);
+        await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, token);
+    }
+
+    private async Task ProcessLifecycleAsync(IChannel channel, BasicGetResult delivery, CancellationToken token)
+    {
+        LifecycleEvent? message;
+        try
+        {
+            message = JsonSerializer.Deserialize<LifecycleEvent>(delivery.Body.Span);
+        }
+        catch (JsonException)
+        {
+            message = null;
+        }
+
+        if (message is null || message.EventId == Guid.Empty || message.OccurredAt == default
+            || string.IsNullOrEmpty(message.Kind) || message.Kind.Length > 64
+            || string.IsNullOrEmpty(message.EntityId) || message.EntityId.Length > 128
+            || message.CorrelationId?.Length > 64 || delivery.BasicProperties.Type != nameof(LifecycleEvent)
+            || delivery.BasicProperties.MessageId != message.EventId.ToString())
+        {
+            await DeadLetterAsync(channel, delivery, token);
+            return;
+        }
+
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuditDb>();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "WorkflowEvents" ("EventId", "Kind", "EntityId", "OccurredAt", "CorrelationId")
+            VALUES ({message.EventId}, {message.Kind}, {message.EntityId}, {message.OccurredAt.ToUniversalTime()},
+                {message.CorrelationId})
+            ON CONFLICT ("EventId") DO NOTHING
+            """, token);
+        await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, token);
+    }
+
+    private async Task DeadLetterAsync(IChannel channel, BasicGetResult delivery, CancellationToken token)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        var properties = new BasicProperties
+        {
+            Persistent = true,
+            MessageId = delivery.BasicProperties.MessageId,
+            Type = delivery.BasicProperties.Type,
+            ContentType = delivery.BasicProperties.ContentType
+        };
+
+        // Confirm the copy before acknowledging the original audit delivery.
+        await channel.BasicPublishAsync("", RabbitTopology.AuditDeadLetterQueue, mandatory: true,
+            properties, delivery.Body, timeout.Token);
+        await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, token);
+        logger.LogWarning("Moved malformed transfer audit event to the dead-letter queue.");
     }
 
     private static TransferCompleted? ReadEvent(BasicGetResult delivery)

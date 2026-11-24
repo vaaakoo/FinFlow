@@ -1,3 +1,4 @@
+using FinFlow.Messaging;
 using Microsoft.EntityFrameworkCore;
 
 namespace FinFlow.Customers.Api;
@@ -12,6 +13,7 @@ public sealed class CustomersDb : DbContext
 
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.Entity<LifecycleOutbox>().HasIndex(row => row.OccurredAt).HasFilter(""" "PublishedAt" IS NULL """);
         var profile = model.Entity<CustomerProfile>();
         profile.HasKey(p => p.Subject);
         profile.Property(p => p.Subject).HasMaxLength(128);

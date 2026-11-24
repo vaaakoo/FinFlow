@@ -7,4 +7,9 @@ TestResults/
 .env
 .env.*
 !.env.example
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+.tools/
+BenchmarkDotNet.Artifacts/
 

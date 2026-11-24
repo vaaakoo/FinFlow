@@ -50,6 +50,33 @@ namespace FinFlow.Audit.Api.Migrations
 
                     b.ToTable("TransferEvents");
                 });
+
+            modelBuilder.Entity("FinFlow.Audit.Api.WorkflowAudit", b =>
+                {
+                    b.Property<Guid>("EventId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CorrelationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("EntityId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("EventId");
+
+                    b.HasIndex("EntityId", "OccurredAt");
+
+                    b.ToTable("WorkflowEvents");
+                });
 #pragma warning restore 612, 618
         }
     }

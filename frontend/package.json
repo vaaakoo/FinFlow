@@ -1,0 +1,27 @@
+{
+  "name": "finflow-portal",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "ng serve --host localhost --port 4200",
+    "build": "ng build"
+  },
+  "dependencies": {
+    "@angular/common": "21.2.26",
+    "@angular/compiler": "21.2.26",
+    "@angular/core": "21.2.26",
+    "@angular/forms": "21.2.26",
+    "@angular/platform-browser": "21.2.26",
+    "@microsoft/signalr": "10.0.0",
+    "oidc-client-ts": "3.3.0",
+    "rxjs": "7.8.2",
+    "tslib": "2.8.1"
+  },
+  "devDependencies": {
+    "@angular/build": "21.2.31",
+    "@angular/cli": "21.2.31",
+    "@angular/compiler-cli": "21.2.26",
+    "playwright": "1.58.2",
+    "typescript": "5.9.3"
+  }
+}

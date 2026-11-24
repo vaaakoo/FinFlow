@@ -1,3 +1,4 @@
+using FinFlow.Messaging;
 using Microsoft.EntityFrameworkCore;
 
 namespace FinFlow.Transfers.Api;
@@ -12,6 +13,7 @@ public sealed class TransfersDb : DbContext
 
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.Entity<LifecycleOutbox>().HasIndex(row => row.OccurredAt).HasFilter(""" "PublishedAt" IS NULL """);
         var order = model.Entity<TransferOrder>();
         order.Property(t => t.Subject).HasMaxLength(128);
         order.Property(t => t.Key).HasMaxLength(128);
@@ -33,6 +35,7 @@ public sealed class TransferOrder
     public Guid DestinationAccountId { get; init; }
     public long AmountMinor { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
+    public string? TraceParent { get; init; }
     public OrderStatus Status { get; set; }
     public Guid? PostingId { get; set; }
     public string? Rejection { get; set; }

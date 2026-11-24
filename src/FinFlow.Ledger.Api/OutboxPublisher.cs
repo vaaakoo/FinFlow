@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using FinFlow.Messaging;
+using FinFlow.Observability;
 using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client;
 
@@ -64,6 +65,7 @@ public sealed class OutboxPublisher : BackgroundService
 
         foreach (var message in pending)
         {
+            using var activity = FinFlowTelemetry.Start("ledger.publish", ActivityKind.Producer, message.TraceParent);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
             await channel.BasicPublishAsync(RabbitTopology.Exchange, RabbitTopology.TransferCompletedRoutingKey,
@@ -73,12 +75,14 @@ public sealed class OutboxPublisher : BackgroundService
                     Persistent = true,
                     ContentType = "application/json",
                     Type = nameof(TransferCompleted),
-                    MessageId = message.Id.ToString()
+                    MessageId = message.Id.ToString(),
+                    Headers = RabbitTopology.TraceHeaders(activity?.Id ?? message.TraceParent)
                 },
                 body: Encoding.UTF8.GetBytes(message.Payload), cancellationToken: timeout.Token);
 
             message.PublishedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(stoppingToken);
+            FinFlowTelemetry.PublishedEvents.Add(1);
         }
     }
 }
@@ -89,19 +93,21 @@ public sealed class OutboxMessage
     public DateTimeOffset CreatedAt { get; init; }
     public required string Payload { get; init; }
     public DateTimeOffset? PublishedAt { get; set; }
+    public string? TraceParent { get; init; }
 
-    public static OutboxMessage FromTransfer(Transfer transfer)
+    public static OutboxMessage FromTransfer(Transfer transfer, string? recipientSubject)
     {
         var transferId = transfer.Id.ToString();
         var correlationId = Activity.Current?.TraceId.ToString() ?? transferId;
         var causationId = transfer.Scope == "http" ? transferId : transfer.IdempotencyKey;
         var message = new TransferCompleted(Guid.NewGuid(), transfer.Id, transfer.SourceAccountId,
             transfer.DestinationAccountId, transfer.AmountMinor, "GEL", transfer.CompletedAt,
-            correlationId, causationId);
+            correlationId, causationId, recipientSubject);
         return new OutboxMessage
         {
             Id = message.EventId,
             CreatedAt = message.CompletedAt,
+            TraceParent = Activity.Current?.Id,
             Payload = JsonSerializer.Serialize(message)
         };
     }

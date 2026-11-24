@@ -10,6 +10,7 @@ public sealed class LedgerDb : DbContext
 
     public static readonly Guid Alice = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     public static readonly Guid Bob = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    public static readonly Guid PaymentSettlement = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
 
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<Transfer> Transfers => Set<Transfer>();
@@ -26,7 +27,8 @@ public sealed class LedgerDb : DbContext
         model.Entity<Account>().HasIndex(a => new { a.OwnerSubject, a.Id });
         model.Entity<Account>().HasData(
             new Account { Id = Alice, Name = "Alice Demo", Balance = 100_000 },
-            new Account { Id = Bob, Name = "Bob Demo", Balance = 50_000 });
+            new Account { Id = Bob, Name = "Bob Demo", Balance = 50_000 },
+            new Account { Id = PaymentSettlement, Name = "Simulated payment settlement", Balance = 0 });
 
         model.Entity<Transfer>().HasIndex(t => new { t.Scope, t.IdempotencyKey }).IsUnique();
         model.Entity<Transfer>().Property(t => t.Scope).HasMaxLength(16).HasDefaultValue("http");

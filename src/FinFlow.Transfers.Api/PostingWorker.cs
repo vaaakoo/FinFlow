@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using FinFlow.Ledger.Contracts;
+using FinFlow.Messaging;
+using FinFlow.Observability;
 using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
 
@@ -58,7 +61,13 @@ public sealed class PostingWorker : BackgroundService
         if (pendingOrders.Count == 0)
             return false;
 
-        await PostOrderAsync(pendingOrders[0], stoppingToken);
+        var order = pendingOrders[0];
+        using var activity = FinFlowTelemetry.Start("transfer.dispatch", ActivityKind.Internal, order.TraceParent);
+        await PostOrderAsync(order, stoppingToken);
+        if (order.Status == OrderStatus.Completed)
+            db.Add(LifecycleOutbox.Create("transfer.completed", order.Id.ToString()));
+        if (order.Status == OrderStatus.Rejected)
+            db.Add(LifecycleOutbox.Create("transfer.rejected", order.Id.ToString()));
         await db.SaveChangesAsync(stoppingToken);
         await transaction.CommitAsync(stoppingToken);
         return true;

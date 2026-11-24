@@ -19,6 +19,9 @@
       },
       {
         "name": "LedgerPoster"
+      },
+      {
+        "name": "PaymentPoster"
       }
     ]
   },
@@ -96,6 +99,37 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "finflow-payments",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${FINFLOW_PAYMENT_CLIENT_SECRET}",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "FinFlow API audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "finflow-api",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "FinFlow roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -103,7 +137,9 @@
       "username": "service-account-finflow-transfers",
       "enabled": true,
       "serviceAccountClientId": "finflow-transfers",
-      "realmRoles": ["LedgerPoster"]
+      "realmRoles": [
+        "LedgerPoster"
+      ]
     },
     {
       "username": "customer",
@@ -176,6 +212,14 @@
           "temporary": false
         }
       ]
+    },
+    {
+      "username": "service-account-finflow-payments",
+      "enabled": true,
+      "realmRoles": [
+        "PaymentPoster"
+      ],
+      "serviceAccountClientId": "finflow-payments"
     }
   ]
 }

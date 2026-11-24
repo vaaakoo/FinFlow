@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using FinFlow.Messaging;
 using Microsoft.EntityFrameworkCore;
 
 namespace FinFlow.Customers.Api;
@@ -13,6 +14,7 @@ public static class CustomerEndpoints
         if (name is null || name.Length is < 1 or > 100)
             return InvalidName();
 
+        await using var transaction = await db.Database.BeginTransactionAsync(token);
         var inserted = await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "Profiles" ("Subject", "DisplayName", "Kyc", "Active")
             VALUES ({subject}, {name}, 'Pending', true)
@@ -21,11 +23,27 @@ public static class CustomerEndpoints
         if (inserted == 0)
             return Results.Problem(statusCode: 409, detail: "A profile already exists for this identity.");
 
+        db.Add(LifecycleOutbox.Create("customer.registered", subject));
+        await db.SaveChangesAsync(token);
+        await transaction.CommitAsync(token);
         return Results.Created("/customers/me", new CustomerView(subject, name, nameof(KycStatus.Pending), true));
     }
 
-    public static Task<IResult> GetOwn(ClaimsPrincipal user, CustomersDb db, CancellationToken token) =>
-        Get(user.FindFirst("sub")!.Value, db, token);
+    public static async Task<IResult> GetOwn(ClaimsPrincipal user, CustomersDb db,
+        CustomerProfileCache cache, CancellationToken token)
+    {
+        var subject = user.FindFirst("sub")!.Value;
+        var cached = await cache.GetAsync(subject, token);
+        if (cached is not null)
+            return Results.Ok(cached);
+
+        var profile = await db.Profiles.AsNoTracking().SingleOrDefaultAsync(p => p.Subject == subject, token);
+        if (profile is null)
+            return Results.NotFound();
+        var view = profile.View();
+        await cache.SetAsync(view, token);
+        return Results.Ok(view);
+    }
 
     public static async Task<IResult> Get(string subject, CustomersDb db, CancellationToken token)
     {
@@ -51,7 +69,7 @@ public static class CustomerEndpoints
         return Results.Ok(new { items, next = profiles.Count > limit ? items[^1].Subject : null });
     }
 
-    public static async Task<IResult> UpdateOwn(ClaimsPrincipal user, ProfileInput input, CustomersDb db,
+    public static async Task<IResult> UpdateOwn(ClaimsPrincipal user, ProfileInput input, CustomersDb db, CustomerProfileCache cache,
         CancellationToken token)
     {
         var name = input.DisplayName?.Trim();
@@ -64,10 +82,11 @@ public static class CustomerEndpoints
         if (!profile.Active)
             return Results.Problem(statusCode: 403, detail: "The profile is inactive.");
         profile.DisplayName = name;
-        return await Save(db, profile, token);
+        return await Save(db, profile, cache, token);
     }
 
-    public static async Task<IResult> SetStatus(string subject, StatusInput input, CustomersDb db, CancellationToken token)
+    public static async Task<IResult> SetStatus(string subject, StatusInput input, CustomersDb db,
+        CustomerProfileCache cache, CancellationToken token)
     {
         if (input.Active is null || !Enum.TryParse<KycStatus>(input.Kyc, ignoreCase: true, out var status)
             || !string.Equals(input.Kyc, status.ToString(), StringComparison.OrdinalIgnoreCase))
@@ -78,14 +97,17 @@ public static class CustomerEndpoints
             return Results.NotFound();
         profile.Active = input.Active.Value;
         profile.Kyc = status;
-        return await Save(db, profile, token);
+        db.Add(LifecycleOutbox.Create("customer.status-changed", subject));
+        return await Save(db, profile, cache, token);
     }
 
-    private static async Task<IResult> Save(CustomersDb db, CustomerProfile profile, CancellationToken token)
+    private static async Task<IResult> Save(CustomersDb db, CustomerProfile profile,
+        CustomerProfileCache cache, CancellationToken token)
     {
         try
         {
             await db.SaveChangesAsync(token);
+            await cache.RemoveAsync(profile.Subject, token);
             return Results.Ok(profile.View());
         }
         catch (DbUpdateConcurrencyException)

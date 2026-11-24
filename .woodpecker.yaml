@@ -1,0 +1,32 @@
+when:
+  - event: [push, manual]
+
+steps:
+  - name: backend
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      - apt-get update -qq && apt-get install -y --no-install-recommends iproute2
+      - export TESTCONTAINERS_HOST_OVERRIDE="$(ip route show default | cut -d ' ' -f 3 | head -n 1)"
+      - dotnet restore -p:NuGetAuditMode=all -warnaserror:NU1901,NU1902,NU1903,NU1904
+      - dotnet build --no-restore -c Release
+      - dotnet test --no-build -c Release
+
+  - name: frontend
+    image: node:24-alpine
+    commands:
+      - npm ci --prefix frontend
+      - npm audit --prefix frontend --omit=dev --audit-level=high
+      - npm run build --prefix frontend
+
+  - name: containers-and-manifests
+    image: docker:29-cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      - apk add --no-cache nodejs
+      - docker compose -f compose.yaml -f compose.secure.yaml -f compose.observability.yaml config --quiet
+      - node infrastructure/kubernetes/render.mjs --observability > /tmp/finflow.json
+      - node -e "const list = require('/tmp/finflow.json'); if (!list.items.some(x => x.kind === 'Deployment' && x.metadata.name === 'gateway')) process.exit(1)"
+      - docker compose -f compose.yaml -f compose.secure.yaml build

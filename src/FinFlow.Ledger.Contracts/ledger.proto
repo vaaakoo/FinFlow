@@ -5,6 +5,19 @@ package finflow.ledger.v1;
 
 service LedgerPosting {
   rpc Post (PostTransfer) returns (PostingOutcome);
+  rpc Charge (ChargePayment) returns (PostingOutcome);
+  rpc Refund (RefundPayment) returns (PostingOutcome);
+}
+
+message ChargePayment {
+  string payment_id = 1;
+  string owner_subject = 2;
+  string source_account_id = 3;
+  int64 amount_minor = 4;
+}
+
+message RefundPayment {
+  string payment_id = 1;
 }
 
 message PostTransfer {

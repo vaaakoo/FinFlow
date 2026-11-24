@@ -1,9 +1,12 @@
 using Microsoft.EntityFrameworkCore;
+using FinFlow.Observability;
 
 namespace FinFlow.Ledger.Api;
 
 public static class Transfers
 {
+    internal const string PaymentCharge = "payment-charge";
+    internal const string PaymentRefund = "payment-refund";
     public static async Task<IResult> Get(Guid id, LedgerDb db, CancellationToken token)
     {
         var transfer = await db.Transfers.FindAsync([id], token);
@@ -57,6 +60,10 @@ public static class Transfers
         if (request.AmountMinor <= 0 || request.SourceAccountId == request.DestinationAccountId)
             return new(null, 400, "Use a positive amount and two distinct accounts.");
 
+        if (scope != PaymentCharge && scope != PaymentRefund
+            && (request.SourceAccountId == LedgerDb.PaymentSettlement || request.DestinationAccountId == LedgerDb.PaymentSettlement))
+            return new(null, 404, "Account not found.");
+
         // PostgreSQL locks both rows in a consistent order, including for reverse transfers.
         var accounts = await db.Accounts.FromSqlInterpolated($"""
             SELECT * FROM "Accounts"
@@ -83,11 +90,12 @@ public static class Transfers
         source.Balance -= transfer.AmountMinor;
         destination.Balance += transfer.AmountMinor;
         db.Transfers.Add(transfer);
-        db.Outbox.Add(OutboxMessage.FromTransfer(transfer));
+        db.Outbox.Add(OutboxMessage.FromTransfer(transfer, destination.OwnerSubject));
         db.Entries.AddRange(new LedgerEntry(transfer.Id, source.Id, -transfer.AmountMinor),
             new LedgerEntry(transfer.Id, destination.Id, transfer.AmountMinor));
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        FinFlowTelemetry.Postings.Add(1);
         return new(transfer);
     }
 

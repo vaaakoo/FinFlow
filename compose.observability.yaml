@@ -1,0 +1,44 @@
+x-otel: &otel
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4317
+  OTEL_METRIC_EXPORT_INTERVAL: "5000"
+
+services:
+  gateway: { environment: *otel }
+  customers: { environment: *otel }
+  ledger: { environment: *otel }
+  transfers: { environment: *otel }
+  payments: { environment: *otel }
+  audit: { environment: *otel }
+  notifications: { environment: *otel }
+
+  collector:
+    image: otel/opentelemetry-collector-contrib:0.144.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./infrastructure/observability/collector.yaml:/etc/otelcol/config.yaml:ro
+  prometheus:
+    image: prom/prometheus:v3.9.1
+    volumes:
+      - ./infrastructure/observability/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+  loki:
+    image: grafana/loki:3.6.5
+    command: ["-config.file=/etc/loki/finflow.yaml"]
+    volumes:
+      - ./infrastructure/observability/loki.yaml:/etc/loki/finflow.yaml:ro
+  tempo:
+    image: grafana/tempo:2.10.0
+    command: ["-config.file=/etc/tempo/finflow.yaml"]
+    volumes:
+      - ./infrastructure/observability/tempo.yaml:/etc/tempo/finflow.yaml:ro
+  grafana:
+    image: grafana/grafana:12.3.3
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${FINFLOW_GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./infrastructure/observability/grafana/datasources.yaml:/etc/grafana/provisioning/datasources/finflow.yaml:ro
+      - ./infrastructure/observability/grafana/dashboards.yaml:/etc/grafana/provisioning/dashboards/finflow.yaml:ro
+      - ./infrastructure/observability/grafana/overview.json:/var/lib/grafana/dashboards/overview.json:ro

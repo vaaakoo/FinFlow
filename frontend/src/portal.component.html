@@ -1,0 +1,232 @@
+<header class="topbar">
+  <a class="brand" href="/" aria-label="FinFlow home"><span class="brand-mark" aria-hidden="true">F</span> FinFlow</a>
+  @if (identity()) {
+    <div class="session"><span>{{ identity()?.profile?.preferred_username }}</span>
+      <button class="quiet" type="button" (click)="signOut()" [disabled]="working()">Sign out</button></div>
+  }
+</header>
+
+@if (starting()) {
+  <main class="welcome"><p role="status">Loading FinFlow…</p></main>
+} @else if (!identity()) {
+  <main class="welcome">
+    <h1>Your FinFlow workspace</h1>
+    <p>Sign in to access accounts, transfers, and simulated payments.</p>
+    @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
+    <button type="button" (click)="signIn()" [disabled]="working()">Sign in</button>
+  </main>
+} @else {
+  <div class="workspace">
+    <nav aria-label="Workspace">
+      @for (item of sections; track item) {
+        <button type="button" [class.selected]="section() === item"
+          [attr.aria-current]="section() === item ? 'page' : null"
+          [disabled]="working()" (click)="open(item)">{{ item }}</button>
+      }
+    </nav>
+    <main class="content">
+      <div class="heading"><h1>{{ section() }}</h1>
+        <button class="quiet" type="button" [disabled]="working()" (click)="open(section())">Refresh</button>
+      </div>
+      @if (working()) { <p role="status">Working…</p> }
+      @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
+      @if (notice()) { <p class="notice" role="status">{{ notice() }}</p> }
+
+      @switch (section()) {
+        @case ('Accounts') {
+          <section class="cards" aria-label="Balances">
+            @for (account of accounts; track account.id) {
+              <article class="balance"><h2>{{ account.name }}</h2>
+                <strong>{{ account.balanceMinor / 100 | number:'1.2-2' }} <small>{{ account.currency }}</small></strong>
+                <code>{{ account.id }}</code>
+                <button class="quiet" type="button" [disabled]="working()" (click)="showStatement(account.id)">Statement</button>
+              </article>
+            } @empty { <p>No accounts have been opened for your profile.</p> }
+          </section>
+        }
+        @case ('Transfers') {
+          <form class="panel form" #transferForm="ngForm" (ngSubmit)="submitTransfer()">
+            <h2>New transfer</h2>
+            <label>From account<select required name="source" [(ngModel)]="transferSource">
+              <option value="">Choose account</option>
+              @for (account of accounts; track account.id) { <option [value]="account.id">{{ account.name }}</option> }
+            </select></label>
+            <label>Destination account ID<input required name="destination" [(ngModel)]="transferDestination"
+              pattern="[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}"></label>
+            <label>Amount in tetri<input type="number" required min="1" step="1" name="amount" [(ngModel)]="transferAmount"></label>
+            <button [disabled]="working() || transferForm.invalid">Submit transfer</button>
+          </form>
+          <section class="panel"><h2>Transfer history</h2>
+            <div class="table-wrap"><table><thead><tr><th>Order</th><th>Amount</th><th>Status</th></tr></thead><tbody>
+              @for (transfer of transfers; track transfer.id) {
+                <tr><td><code>{{ transfer.id }}</code></td><td>{{ transfer.amountMinor }} tetri</td>
+                  <td>{{ transfer.status }} @if (transfer.rejection) { <span class="muted">{{ transfer.rejection }}</span> }</td></tr>
+              } @empty { <tr><td colspan="3">No transfers yet.</td></tr> }
+            </tbody></table></div>
+            @if (transferNext) { <button class="quiet" type="button" (click)="moreTransfers()" [disabled]="working()">Load more</button> }
+          </section>
+        }
+        @case ('Payments') {
+          <form class="panel form" #paymentForm="ngForm" (ngSubmit)="submitPayment()">
+            <h2>Simulated payment</h2>
+            <label>Account<select required name="account" [(ngModel)]="paymentAccount">
+              <option value="">Choose account</option>
+              @for (account of accounts; track account.id) { <option [value]="account.id">{{ account.name }}</option> }
+            </select></label>
+            <label>Amount in tetri<input type="number" required min="1" step="1" name="amount" [(ngModel)]="paymentAmount"></label>
+            <label>Provider scenario<select name="scenario" [(ngModel)]="paymentScenario">
+              @for (item of paymentScenarios; track item) { <option [value]="item">{{ item }}</option> }
+            </select></label>
+            <button [disabled]="working() || paymentForm.invalid">Submit payment</button>
+          </form>
+          <section class="panel"><h2>Payment history</h2>
+            <div class="table-wrap"><table><thead><tr><th>Payment</th><th>Amount</th><th>Scenario</th><th>Status</th><th>Action</th></tr></thead><tbody>
+              @for (payment of payments; track payment.id) {
+                <tr><td><code>{{ payment.id }}</code></td><td>{{ payment.amountMinor }} tetri</td>
+                  <td>{{ payment.scenario }}</td><td>{{ payment.status }} {{ payment.reason }}</td><td>
+                  @if (payment.status === 'Settled' || payment.status === 'RefundRejected') {
+                    <button class="quiet" type="button" (click)="refund(payment.id)" [disabled]="working()">Refund</button>
+                  }</td></tr>
+              } @empty { <tr><td colspan="5">No payments yet.</td></tr> }
+            </tbody></table></div>
+            <div class="actions">
+              <button class="quiet" type="button" [disabled]="working() || paymentPage === 1" (click)="paymentHistory(paymentPage - 1)">Previous</button>
+              <button class="quiet" type="button" [disabled]="working() || payments.length < 25" (click)="paymentHistory(paymentPage + 1)">Next</button>
+            </div>
+          </section>
+        }
+        @case ('Notifications') {
+          <section class="panel">
+            @for (entry of notifications(); track entry.eventId) {
+              <div class="notification"><div><strong>Received {{ entry.amountMinor }} tetri</strong>
+                <p>{{ entry.createdAt | date:'medium' }} · {{ entry.readAt ? 'Read' : 'Unread' }}</p></div>
+                @if (!entry.readAt) { <button class="quiet" type="button" (click)="markRead(entry.eventId)" [disabled]="working()">Mark read</button> }
+              </div>
+            } @empty { <p>No notifications.</p> }
+            <div class="actions">
+              <button class="quiet" type="button" [disabled]="working() || notificationPage === 1" (click)="notificationHistory(notificationPage - 1)">Previous</button>
+              <button class="quiet" type="button" [disabled]="working() || notifications().length < 25" (click)="notificationHistory(notificationPage + 1)">Next</button>
+            </div>
+          </section>
+        }
+        @case ('Profile') {
+          <form class="panel form" #profileForm="ngForm" (ngSubmit)="saveProfile()">
+            <h2>{{ profile ? 'Edit profile' : 'Register profile' }}</h2>
+            <label>Display name<input name="name" required maxlength="100" [(ngModel)]="profileName"></label>
+            @if (profile) { <p>KYC: {{ profile.kyc }} · {{ profile.active ? 'Active' : 'Inactive' }}</p> }
+            <button [disabled]="working() || profileForm.invalid">Save profile</button>
+          </form>
+        }
+        @case ('Customers') {
+          <section class="panel">
+            <label>Filter displayed customers<input [(ngModel)]="customerFilter"></label>
+            <div class="table-wrap"><table><thead><tr><th>Name</th><th>Subject</th><th>KYC</th><th>Active</th><th>Actions</th></tr></thead><tbody>
+              @for (profile of visibleCustomers; track profile.subject) {
+                <tr><td>{{ profile.displayName }}</td><td><code>{{ profile.subject }}</code></td>
+                  <td>{{ profile.kyc }}</td><td>{{ profile.active ? 'Yes' : 'No' }}</td><td class="actions">
+                    <button class="quiet" type="button" [disabled]="working()" (click)="setCustomerStatus(profile, 'Verified', profile.active)">Verify</button>
+                    <button class="quiet" type="button" [disabled]="working()" (click)="setCustomerStatus(profile, 'Rejected', profile.active)">Reject</button>
+                    <button class="quiet" type="button" [disabled]="working()" (click)="setCustomerStatus(profile, profile.kyc, !profile.active)">{{ profile.active ? 'Deactivate' : 'Activate' }}</button>
+                  </td></tr>
+              } @empty { <tr><td colspan="5">No matching customers.</td></tr> }
+            </tbody></table></div>
+            @if (customerNext) { <button class="quiet" type="button" (click)="moreCustomers()" [disabled]="working()">Load more</button> }
+          </section>
+        }
+        @case ('Operations') {
+          @if (reconciliation) {
+            <section class="panel"><h2>Reconciliation</h2>
+              <p>{{ reconciliation.transfersChecked }} transfers checked · {{ reconciliation.invalidPostings }} invalid postings</p>
+            </section>
+          }
+          <form class="panel form" #accountForm="ngForm" (ngSubmit)="openAccount()">
+            <h2>Open account</h2>
+            <label>Name<input name="name" required maxlength="100" [(ngModel)]="accountName"></label>
+            <label>Owner subject<input name="owner" required maxlength="128" [(ngModel)]="ownerSubject"></label>
+            <button [disabled]="working() || accountForm.invalid">Open account</button>
+          </form>
+          <section class="panel">
+            <h2>Ledger accounts</h2>
+            @for (account of accounts; track account.id) {
+              <div class="notification"><div><strong>{{ account.name }} · {{ account.balanceMinor }} tetri</strong>
+                <p><code>{{ account.id }}</code></p></div>
+                <button class="quiet" type="button" [disabled]="working()" (click)="showStatement(account.id)">Statement</button>
+              </div>
+            } @empty { <p>No ledger accounts.</p> }
+          </section>
+          <form class="panel form" #fundForm="ngForm" (ngSubmit)="fundAccount()">
+            <h2>Fund an account</h2>
+            <label>From<select required name="source" [(ngModel)]="fundingSource">
+              <option value="">Choose account</option>
+              @for (account of accounts; track account.id) { <option [value]="account.id">{{ account.name }}</option> }
+            </select></label>
+            <label>To<select required name="destination" [(ngModel)]="fundingDestination">
+              <option value="">Choose account</option>
+              @for (account of accounts; track account.id) { <option [value]="account.id">{{ account.name }}</option> }
+            </select></label>
+            <label>Amount in tetri<input type="number" required min="1" step="1" name="amount" [(ngModel)]="fundingAmount"></label>
+            <button [disabled]="working() || fundForm.invalid || fundingSource === fundingDestination">Fund account</button>
+          </form>
+          <section class="panel">
+            <h2>Operation history</h2>
+            <form class="form" (ngSubmit)="operationsHistory(1)">
+              <label>Workflow<select name="kind" [(ngModel)]="operationKind" (ngModelChange)="changeOperationKind()">
+                <option value="transfers">Transfers</option><option value="payments">Payments</option>
+              </select></label>
+              <label>Status<select name="status" [(ngModel)]="operationStatus">
+                <option value="">Any status</option><option>Pending</option>
+                @if (operationKind === 'transfers') { <option>Completed</option><option>Rejected</option> }
+                @else { <option>Settled</option><option>Failed</option><option>Refunded</option><option>RefundPending</option><option>RefundRejected</option> }
+              </select></label>
+              <button [disabled]="working()">Filter</button>
+            </form>
+            <div class="table-wrap"><table><thead><tr><th>Identifier</th><th>Amount</th><th>Status</th></tr></thead><tbody>
+              @if (operationKind === 'transfers') {
+                @for (item of staffTransfers; track item.id) {
+                  <tr><td><code>{{ item.id }}</code></td><td>{{ item.amountMinor }} tetri</td><td>{{ item.status }} {{ item.rejection }}</td></tr>
+                } @empty { <tr><td colspan="3">No transfers match.</td></tr> }
+              } @else {
+                @for (item of staffPayments; track item.id) {
+                  <tr><td><code>{{ item.id }}</code></td><td>{{ item.amountMinor }} tetri</td><td>{{ item.status }} {{ item.reason }}</td></tr>
+                } @empty { <tr><td colspan="3">No payments match.</td></tr> }
+              }
+            </tbody></table></div>
+            <div class="actions">
+              <button class="quiet" type="button" [disabled]="working() || operationsPage === 1" (click)="operationsHistory(operationsPage - 1)">Previous</button>
+              <button class="quiet" type="button" [disabled]="working() || (operationKind === 'transfers' ? staffTransfers.length : staffPayments.length) < 25" (click)="operationsHistory(operationsPage + 1)">Next</button>
+            </div>
+          </section>
+        }
+        @case ('Audit') {
+          <section class="panel">
+            <form class="form" (ngSubmit)="auditHistory(1)"><label>Entity ID<input name="filter" [(ngModel)]="auditFilter"></label>
+              <button [disabled]="working()">Filter</button></form>
+            <div class="table-wrap"><table><thead><tr><th>Event</th><th>Entity</th><th>Time</th></tr></thead><tbody>
+              @for (event of audit; track event.eventId) {
+                <tr><td>{{ event.kind }}</td><td><code>{{ event.entityId }}</code></td><td>{{ event.occurredAt | date:'medium' }}</td></tr>
+              } @empty { <tr><td colspan="3">No matching audit events.</td></tr> }
+            </tbody></table></div>
+            <div class="actions">
+              <button class="quiet" type="button" [disabled]="working() || auditPage === 1" (click)="auditHistory(auditPage - 1)">Previous</button>
+              <button class="quiet" type="button" [disabled]="working() || audit.length < 25" (click)="auditHistory(auditPage + 1)">Next</button>
+            </div>
+          </section>
+        }
+      }
+
+      @if (statement && (section() === 'Accounts' || section() === 'Operations')) {
+        <section class="panel"><div class="heading"><h2>Statement · {{ statementAccount }}</h2>
+          <button class="quiet" type="button" (click)="statement = undefined">Close</button></div>
+          <div class="table-wrap"><table><thead><tr><th>Transfer</th><th>Date</th><th>Amount</th></tr></thead><tbody>
+            @for (entry of statement.items; track entry.transferId) {
+              <tr><td><code>{{ entry.transferId }}</code></td><td>{{ entry.completedAt | date:'medium' }}</td><td>{{ entry.deltaMinor }} tetri</td></tr>
+            } @empty { <tr><td colspan="3">No entries.</td></tr> }
+          </tbody></table></div>
+          @if (statement.next) {
+            <button class="quiet" type="button" [disabled]="working()" (click)="showStatement(selectedStatementAccount, statement.next)">Next page</button>
+          }
+        </section>
+      }
+    </main>
+  </div>
+}

@@ -1,6 +1,9 @@
+extern alias AuditApi;
+
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AuditApi::FinFlow.Audit.Api;
 using FinFlow.Ledger.Api;
 using FinFlow.Messaging;
 using FinFlow.Notifications.Worker;
@@ -8,6 +11,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using RabbitMQ.Client;
 using Testcontainers.RabbitMq;
 
@@ -15,6 +19,58 @@ namespace FinFlow.Tests;
 
 public sealed class DeliveryTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
+    [Fact]
+    public async Task Audit_preserves_malformed_deliveries_and_processes_valid_events()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        var token = deadline.Token;
+        await using var rabbit = new RabbitMqBuilder("rabbitmq:4-management-alpine").Build();
+        await rabbit.StartAsync(token);
+        var broker = RabbitTopology.CreateFactory(rabbit.GetConnectionString());
+        var database = await postgres.CreateDatabaseAsync();
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddDbContext<AuditDb>(options => options.UseNpgsql(database));
+        builder.Services.AddSingleton(broker);
+        builder.Services.AddHostedService<AuditConsumer>();
+        using var host = builder.Build();
+        await using var scope = host.Services.CreateAsyncScope();
+        var audit = scope.ServiceProvider.GetRequiredService<AuditDb>();
+        await audit.Database.MigrateAsync(token);
+
+        await using var connection = await broker.CreateConnectionAsync(token);
+        await using var channel = await connection.CreateChannelAsync(
+            new CreateChannelOptions(true, true), token);
+        await RabbitTopology.DeclareAuditQueueAsync(channel, token);
+        await channel.BasicPublishAsync(RabbitTopology.Exchange, RabbitTopology.TransferCompletedRoutingKey,
+            mandatory: true, new BasicProperties { MessageId = "invalid-audit", Type = nameof(TransferCompleted) },
+            "invalid json"u8.ToArray(), token);
+
+        var completed = new TransferCompleted(Guid.NewGuid(), Guid.NewGuid(), LedgerDb.Alice, LedgerDb.Bob,
+            100, "GEL", DateTimeOffset.UtcNow);
+        await channel.BasicPublishAsync(RabbitTopology.Exchange, RabbitTopology.TransferCompletedRoutingKey,
+            mandatory: true, new BasicProperties
+            {
+                MessageId = completed.EventId.ToString(),
+                Type = nameof(TransferCompleted)
+            }, JsonSerializer.SerializeToUtf8Bytes(completed), token);
+
+        await host.StartAsync(token);
+        try
+        {
+            await EventuallyAsync(() => audit.TransferEvents.AnyAsync(token), token);
+            var row = await audit.TransferEvents.SingleAsync(token);
+            Assert.Equal(completed.EventId, row.EventId);
+            var deadLetter = await channel.BasicGetAsync(RabbitTopology.AuditDeadLetterQueue, autoAck: true, token);
+            Assert.NotNull(deadLetter);
+            Assert.Equal("invalid-audit", deadLetter.BasicProperties.MessageId);
+            Assert.True(deadLetter.Body.Span.SequenceEqual("invalid json"u8));
+        }
+        finally
+        {
+            await host.StopAsync(CancellationToken.None);
+        }
+    }
+
     [Fact]
     public async Task Broker_outage_preserves_transfer_and_recovery_handles_a_real_redelivery()
     {

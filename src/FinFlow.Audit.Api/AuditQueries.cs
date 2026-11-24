@@ -4,6 +4,20 @@ namespace FinFlow.Audit.Api;
 
 public static class AuditQueries
 {
+    public static async Task<IResult> ListLifecycle(string? entityId, int? page, AuditDb db, CancellationToken token)
+    {
+        var pageNumber = page ?? 1;
+        if (pageNumber is < 1 or > 1000)
+            return Results.Problem(statusCode: 400, detail: "Page must be between 1 and 1000.");
+
+        var query = db.WorkflowEvents.AsNoTracking();
+        if (!string.IsNullOrEmpty(entityId))
+            query = query.Where(entry => entry.EntityId == entityId);
+        var rows = await query.OrderByDescending(entry => entry.OccurredAt).ThenByDescending(entry => entry.EventId)
+            .Skip((pageNumber - 1) * 25).Take(25).ToListAsync(token);
+        return Results.Ok(rows);
+    }
+
     public static async Task<IResult> ListTransfers(Guid? transferId, int? size, Guid? before,
         AuditDb db, CancellationToken token)
     {
