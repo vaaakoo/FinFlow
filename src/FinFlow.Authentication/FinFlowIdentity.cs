@@ -9,6 +9,7 @@ public static class FinFlowIdentity
     public const string StaffPolicy = "BankStaff";
     public const string CustomerPolicy = "Customer";
     public const string LedgerPosterPolicy = "LedgerPoster";
+    public const string ReadAuditPolicy = "ReadAudit";
 
     public static void AddFinFlowIdentity(this IServiceCollection services, IConfiguration configuration)
     {
@@ -31,7 +32,9 @@ public static class FinFlowIdentity
             .AddPolicy(CustomerPolicy, policy => policy.RequireAuthenticatedUser().RequireRole("Customer")
                 .RequireAssertion(context => context.User.FindFirst("sub")?.Value.Length is > 0 and <= 128))
             .AddPolicy(LedgerPosterPolicy, policy => policy.RequireAuthenticatedUser().RequireRole("LedgerPoster")
-                .RequireClaim("azp", "finflow-transfers"));
+                .RequireClaim("azp", "finflow-transfers"))
+            .AddPolicy(ReadAuditPolicy, policy => policy.RequireAuthenticatedUser()
+                .RequireRole("Auditor", "Administrator"));
     }
 }
 

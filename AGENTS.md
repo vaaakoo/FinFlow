@@ -16,4 +16,12 @@
 - Use modern C# features when they improve readability. Comment business rules and technical decisions that the code cannot explain on its own.
 - Keep validation and error handling proportional to the operation. Preserve security, performance, service boundaries, and financial consistency.
 - Simplify relevant code as you work. Preserve the roadmap and existing behavior.
+- Prefer conventional constructors for dependency injection. Use records for concise data contracts when they make the code clearer.
+- Keep startup files focused on registration and routing. Keep business logic in the owning service and use framework and library APIs directly.
+- Keep related code together so a reader can follow the execution flow without jumping across small wrappers.
+
+## Implementation guide
+
+- After all six stages are complete, write `docs/IMPLEMENTATION_GUIDE.md` in simple English. Explain each implemented technology and pattern, why FinFlow uses it, which service owns it, and how to demonstrate it.
+- Point to actual paths, classes, and methods for registration, authentication, account creation, transfers, payment simulation and recovery, RabbitMQ processing, real-time notifications, and distributed tracing. Mark any unverified behavior explicitly.
 

@@ -2,8 +2,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace FinFlow.Ledger.Api;
 
-public sealed class LedgerDb(DbContextOptions<LedgerDb> options) : DbContext(options)
+public sealed class LedgerDb : DbContext
 {
+    public LedgerDb(DbContextOptions<LedgerDb> options) : base(options)
+    {
+    }
+
     public static readonly Guid Alice = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     public static readonly Guid Bob = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 

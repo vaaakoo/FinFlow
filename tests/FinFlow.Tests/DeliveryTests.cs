@@ -89,8 +89,18 @@ public sealed class DeliveryTests(PostgresFixture postgres) : IClassFixture<Post
         await worker.StartAsync(token);
         try
         {
+            await using var channel = await connection.CreateChannelAsync(cancellationToken: token);
+            await channel.BasicPublishAsync(RabbitTopology.Exchange, RabbitTopology.TransferCompletedRoutingKey,
+                mandatory: true, new BasicProperties { MessageId = "invalid-test-event" },
+                "invalid json"u8.ToArray(), token);
             var next = await Send(client, "following", 100, token);
             await EventuallyAsync(() => notifications.Notifications.AnyAsync(n => n.TransferId == next.Id, token), token);
+            await EventuallyAsync(async () => await channel.MessageCountAsync(
+                RabbitTopology.NotificationDeadLetterQueue, token) > 0, token);
+            var deadLetter = await channel.BasicGetAsync(RabbitTopology.NotificationDeadLetterQueue, autoAck: true, token);
+            Assert.NotNull(deadLetter);
+            Assert.Equal("invalid-test-event", deadLetter.BasicProperties.MessageId);
+            Assert.True(deadLetter.Body.Span.SequenceEqual("invalid json"u8));
             var records = await notifications.Notifications.AsNoTracking().ToListAsync(token);
             Assert.Equal(2, records.Count);
             var record = Assert.Single(records, n => n.TransferId == first.Id);

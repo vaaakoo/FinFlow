@@ -120,10 +120,13 @@ Administrator and BankOperator roles can access the original ledger routes. Cust
 | `GET /customers/me/transfers/{id}`, `GET /customers/me/transfers?size=25` | Customers read the outcome or browse their transfer history. Use the returned `next` value as `before`. |
 | `GET /accounts/{id}/statement?size=25` | Staff read a signed ledger statement. Pass the returned `beforeId` and `beforeTime` cursor values to fetch the next page. |
 | `GET /staff/ledger/reconciliation` | Staff check the transfer and invalid-posting counts. |
+| `GET /staff/audit/transfers?transferId={id}` | Auditors and administrators read transfer completion audit entries. Use `size` and the returned `next` value as `before` for pagination. |
 
 The Transfer API persists orders in `finflow_transfers`. Its worker retries the same order ID when the ledger call fails or its outcome is uncertain. The internal gRPC endpoint requires a Keycloak service-account token. The ledger rechecks source ownership and posts atomically. New accounts start at zero. Staff can fund a demo account using the original transfer endpoint.
 
 With Node.js 22 or newer, verify sign-in, authorization, profile registration, simulated KYC, account ownership, and transfers against the running secured stack. The smoke check creates and funds a synthetic account.
+
+The Audit API consumes transfer-completed events from its own durable RabbitMQ queue and stores event IDs, transfer IDs, timestamps, and correlation identifiers in `finflow_audit`. The broker also retains malformed notification deliveries in `finflow.notifications.dead-letter` for local inspection.
 
 ```sh
 node --env-file-if-exists=.env tests/smoke-secure.mjs

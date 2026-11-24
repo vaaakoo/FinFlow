@@ -38,9 +38,12 @@ public static class TransferEndpoints
     public static async Task<IResult> Get(Guid id, ClaimsPrincipal user, TransfersDb db, CancellationToken token)
     {
         var subject = user.FindFirst("sub")!.Value;
-        return await db.Orders.AsNoTracking().SingleOrDefaultAsync(o => o.Id == id && o.Subject == subject, token) is { } order
-            ? Results.Ok(order.View())
-            : Results.NotFound();
+        var order = await db.Orders.AsNoTracking()
+            .SingleOrDefaultAsync(o => o.Id == id && o.Subject == subject, token);
+        if (order is null)
+            return Results.NotFound();
+
+        return Results.Ok(order.View());
     }
 
     public static async Task<IResult> List(ClaimsPrincipal user, int? size, Guid? before, TransfersDb db,

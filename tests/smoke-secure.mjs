@@ -171,6 +171,26 @@ const balances = await (await request('/customers/me/accounts', customer)).json(
 assert.equal(balances.find(item => item.id === account.id).balanceMinor, 350);
 console.log('Customer transfer, idempotent retry, foreign-account rejection, and transfer history passed.');
 
+const auditPath = '/staff/audit/transfers?transferId=' + completed.postingId;
+assert.equal((await request(auditPath, customer)).status, 403);
+assert.equal((await request(auditPath, operator)).status, 403);
+const auditor = await signIn('auditor');
+let auditItems = [];
+for (let attempt = 0; attempt < 20; attempt++) {
+    const result = await request(auditPath, auditor);
+    assert.equal(result.status, 200);
+    auditItems = (await result.json()).items;
+    if (auditItems.length > 0) break;
+    await delay(500);
+}
+assert.equal(auditItems.length, 1);
+assert.equal(auditItems[0].transferId, completed.postingId);
+assert.equal(auditItems[0].causationId, order.id);
+assert.ok(auditItems[0].correlationId);
+assert.deepEqual(Object.keys(auditItems[0]).sort(),
+    ['causationId', 'completedAt', 'correlationId', 'eventId', 'transferId']);
+console.log('Audit fan-out, role checks, and minimal audit payload passed.');
+
 if (process.env.FINFLOW_SMOKE_COMPOSE_PROJECT) {
     const project = process.env.FINFLOW_SMOKE_COMPOSE_PROJECT;
     function changeLedgerState(command) {

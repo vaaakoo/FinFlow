@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/FinFlow.Audit.Api/FinFlow.Audit.Api.csproj" />
     <Project Path="src/FinFlow.Authentication/FinFlow.Authentication.csproj" />
     <Project Path="src/FinFlow.Customers.Api/FinFlow.Customers.Api.csproj" />
     <Project Path="src/FinFlow.Gateway/FinFlow.Gateway.csproj" />

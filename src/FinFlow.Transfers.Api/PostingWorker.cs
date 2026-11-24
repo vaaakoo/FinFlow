@@ -6,9 +6,27 @@ using Microsoft.EntityFrameworkCore;
 
 namespace FinFlow.Transfers.Api;
 
-public sealed class PostingWorker(IServiceScopeFactory scopes, LedgerPosting.LedgerPostingClient ledger,
-    IHttpClientFactory clients, PostingOptions options, ILogger<PostingWorker> logger) : BackgroundService
+public sealed class PostingWorker : BackgroundService
 {
+    private readonly IServiceScopeFactory scopes;
+    private readonly LedgerPosting.LedgerPostingClient ledger;
+    private readonly IHttpClientFactory clients;
+    private readonly PostingOptions options;
+    private readonly ILogger<PostingWorker> logger;
+
+    public PostingWorker(IServiceScopeFactory scopes,
+        LedgerPosting.LedgerPostingClient ledger,
+        IHttpClientFactory clients,
+        PostingOptions options,
+        ILogger<PostingWorker> logger)
+    {
+        this.scopes = scopes;
+        this.ledger = ledger;
+        this.clients = clients;
+        this.options = options;
+        this.logger = logger;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)

@@ -12,15 +12,21 @@ Stage 2 added Customer and Transfer APIs with separate databases, profile regist
 
 Transfer events publish to the durable RabbitMQ topic exchange using the versioned route `ledger.transfer-completed.v1`. The original notification queue is bound to this route so pending and existing messages remain consumable. New events include correlation and causation identifiers.
 
+The existing services were reviewed for readability. Workers and EF Core contexts use conventional dependency-injection constructors, ledger startup maps named endpoint handlers, and common endpoint branches use explicit control flow. The permanent standards and final implementation-guide requirement are in `AGENTS.md`.
+
+The notification worker preserves malformed deliveries in a confirmed dead-letter queue. The new Audit API has a separate database and consumes transfer-completed events using its own durable subscription. It stores append-only, deduplicated records with a minimal payload. Auditors and administrators can query records through the secured gateway.
+
 ### Validation
 
 - Release build passed with zero warnings and errors. All eight PostgreSQL and RabbitMQ integration tests passed after the Stage 3 messaging change, including routing, correlation, broker recovery, and deduplication.
 - A fresh secured Compose project passed PKCE sign-in, 401/403 role checks, customer registration and KYC, account ownership, a customer transfer, concurrent idempotent submits, foreign-account rejection, and transfer history. A separate direct ledger probe returned 401 without a token.
 - The secured smoke test stopped the Ledger, submitted an order, observed it remain pending, restarted the Ledger, and verified the order completed with one debit.
+- After the readability refactor, all eight integration tests passed. The focused RabbitMQ test also passed with the malformed-delivery dead-letter assertion. Secured Compose smoke checks passed for transfer audit fan-out, auditor access, rejection of non-audit roles, and the minimal payload. PostgreSQL rejected an update to a stored audit row.
 - NuGet reported no vulnerable direct or transitive packages from the configured sources at the time of the check.
 
 ### Remaining work
 
-- Stage 3 still needs Customer and Transfer lifecycle events beyond ledger completion, individual service subscriptions and dead-letter handling, Audit storage and queries, the Payment Saga with simulated outcomes and compensating ledger entries, Valkey, Mailpit, and notification history and realtime delivery.
+- Stage 3 still needs Customer and Transfer lifecycle events beyond ledger completion, audit coverage of those events, bounded retry and dead-letter policies for remaining consumers, the Payment Saga with simulated outcomes and compensating ledger entries, Valkey, Mailpit, and notification history and realtime delivery.
 - Stages 4–6 still need both Angular portals, observability, measured performance results, Aspire, local Kubernetes validation, Woodpecker CI, and release preparation. `kubectl` is available and has no current context. See [PROJECT_PLAN.md](PROJECT_PLAN.md).
+- Write `docs/IMPLEMENTATION_GUIDE.md` after all six stages are complete.
 

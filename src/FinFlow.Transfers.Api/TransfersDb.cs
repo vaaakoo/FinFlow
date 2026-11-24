@@ -2,8 +2,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace FinFlow.Transfers.Api;
 
-public sealed class TransfersDb(DbContextOptions<TransfersDb> options) : DbContext(options)
+public sealed class TransfersDb : DbContext
 {
+    public TransfersDb(DbContextOptions<TransfersDb> options) : base(options)
+    {
+    }
+
     public DbSet<TransferOrder> Orders => Set<TransferOrder>();
 
     protected override void OnModelCreating(ModelBuilder model)

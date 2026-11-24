@@ -4,9 +4,21 @@ using RabbitMQ.Client;
 
 namespace FinFlow.Notifications.Worker;
 
-public sealed class NotificationConsumer(IServiceScopeFactory scopes, ConnectionFactory broker,
-    ILogger<NotificationConsumer> logger) : BackgroundService
+public sealed class NotificationConsumer : BackgroundService
 {
+    private readonly IServiceScopeFactory scopes;
+    private readonly ConnectionFactory broker;
+    private readonly ILogger<NotificationConsumer> logger;
+
+    public NotificationConsumer(IServiceScopeFactory scopes,
+        ConnectionFactory broker,
+        ILogger<NotificationConsumer> logger)
+    {
+        this.scopes = scopes;
+        this.broker = broker;
+        this.logger = logger;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -30,8 +42,12 @@ public sealed class NotificationConsumer(IServiceScopeFactory scopes, Connection
     private async Task ConsumeAsync(CancellationToken stoppingToken)
     {
         await using var connection = await broker.CreateConnectionAsync(stoppingToken);
-        await using var channel = await connection.CreateChannelAsync(cancellationToken: stoppingToken);
+        var channelOptions = new CreateChannelOptions(
+            publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true);
+        await using var channel = await connection.CreateChannelAsync(channelOptions, stoppingToken);
         await RabbitTopology.DeclareAsync(channel, stoppingToken);
+        await channel.QueueDeclareAsync(RabbitTopology.NotificationDeadLetterQueue,
+            durable: true, exclusive: false, autoDelete: false, cancellationToken: stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -57,8 +73,7 @@ public sealed class NotificationConsumer(IServiceScopeFactory scopes, Connection
                 || delivery.BasicProperties.Type != nameof(TransferCompleted)
                 || delivery.BasicProperties.MessageId != message.EventId.ToString())
             {
-                logger.LogWarning("Rejecting invalid transfer event {MessageId}.", delivery.BasicProperties.MessageId);
-                await channel.BasicRejectAsync(delivery.DeliveryTag, requeue: false, stoppingToken);
+                await DeadLetterAsync(channel, delivery, stoppingToken);
                 continue;
             }
 
@@ -67,6 +82,25 @@ public sealed class NotificationConsumer(IServiceScopeFactory scopes, Connection
             await db.StoreAsync(message, stoppingToken);
             await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, stoppingToken);
         }
+    }
+
+    private async Task DeadLetterAsync(IChannel channel, BasicGetResult delivery, CancellationToken stoppingToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        var properties = new BasicProperties
+        {
+            Persistent = true,
+            MessageId = delivery.BasicProperties.MessageId,
+            Type = delivery.BasicProperties.Type,
+            ContentType = delivery.BasicProperties.ContentType
+        };
+
+        // Confirm the copy before acknowledging the original. Existing queue declarations remain valid.
+        await channel.BasicPublishAsync("", RabbitTopology.NotificationDeadLetterQueue, mandatory: true,
+            properties, delivery.Body, timeout.Token);
+        await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, stoppingToken);
+        logger.LogWarning("Moved invalid transfer event {MessageId} to the dead-letter queue.", properties.MessageId);
     }
 }
 

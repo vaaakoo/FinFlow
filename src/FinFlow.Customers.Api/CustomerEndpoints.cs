@@ -27,10 +27,14 @@ public static class CustomerEndpoints
     public static Task<IResult> GetOwn(ClaimsPrincipal user, CustomersDb db, CancellationToken token) =>
         Get(user.FindFirst("sub")!.Value, db, token);
 
-    public static async Task<IResult> Get(string subject, CustomersDb db, CancellationToken token) =>
-        await db.Profiles.AsNoTracking().SingleOrDefaultAsync(p => p.Subject == subject, token) is { } profile
-            ? Results.Ok(profile.View())
-            : Results.NotFound();
+    public static async Task<IResult> Get(string subject, CustomersDb db, CancellationToken token)
+    {
+        var profile = await db.Profiles.AsNoTracking().SingleOrDefaultAsync(p => p.Subject == subject, token);
+        if (profile is null)
+            return Results.NotFound();
+
+        return Results.Ok(profile.View());
+    }
 
     public static async Task<IResult> List(string? after, int? size, CustomersDb db, CancellationToken token)
     {

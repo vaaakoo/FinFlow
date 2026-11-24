@@ -2,8 +2,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace FinFlow.Customers.Api;
 
-public sealed class CustomersDb(DbContextOptions<CustomersDb> options) : DbContext(options)
+public sealed class CustomersDb : DbContext
 {
+    public CustomersDb(DbContextOptions<CustomersDb> options) : base(options)
+    {
+    }
+
     public DbSet<CustomerProfile> Profiles => Set<CustomerProfile>();
 
     protected override void OnModelCreating(ModelBuilder model)

@@ -3,8 +3,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace FinFlow.Notifications.Worker;
 
-public sealed class NotificationsDb(DbContextOptions<NotificationsDb> options) : DbContext(options)
+public sealed class NotificationsDb : DbContext
 {
+    public NotificationsDb(DbContextOptions<NotificationsDb> options) : base(options)
+    {
+    }
+
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
 

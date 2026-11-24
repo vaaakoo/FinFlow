@@ -40,6 +40,21 @@ services:
       Kestrel__Endpoints__Grpc__Url: http://+:8081
       Kestrel__Endpoints__Grpc__Protocols: Http2
       Identity__Enabled: "true"
+      RabbitMq__AuditEnabled: "true"
+
+  audit:
+    healthcheck: *http-health
+    build:
+      context: .
+      target: audit
+    environment:
+      <<: *api-identity
+      ASPNETCORE_HTTP_PORTS: 8080
+      ConnectionStrings__Audit: "Host=postgres;Database=finflow_audit;Username=finflow;Password=${FINFLOW_POSTGRES_PASSWORD:-demo-postgres}"
+      RabbitMq__Uri: "amqp://finflow:${FINFLOW_RABBITMQ_PASSWORD:-demo-rabbitmq}@rabbitmq:5672/"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   customers:
     healthcheck: *http-health
@@ -65,6 +80,8 @@ services:
     ports:
       - "127.0.0.1:${FINFLOW_GATEWAY_PORT:-8081}:8080"
     depends_on:
+      audit:
+        condition: service_healthy
       customers:
         condition: service_healthy
       ledger:

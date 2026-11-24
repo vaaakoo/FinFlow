@@ -16,6 +16,9 @@ flowchart LR
     Ledger -->|Confirmed outbox publish| RabbitMQ[finflow.events topic exchange]
     RabbitMQ --> Worker[Notifications Worker]
     Worker --> NotificationDb[(finflow_notifications)]
+    RabbitMQ --> Audit[Audit API]
+    Gateway --> Audit
+    Audit --> AuditDb[(finflow_audit)]
 ```
 
 Customer records are keyed by the Keycloak subject and do not contain credentials. Registration and profile updates are self-service. Staff manage status and simulated KYC in the Customer API and provision accounts in the Ledger API. Customer account lists, statements, and transfer history are scoped to the bearer token subject. The original transfer routes remain available to staff in secured mode.
@@ -44,5 +47,5 @@ sequenceDiagram
 
 Each application migrates its own database. PostgreSQL enforces balanced postings at transaction commit and rejects changes to posted entries and transfers. The statement query pages over immutable postings ordered by completion time and transfer ID. Reconciliation checks that every transfer has one matching signed debit and one matching signed credit.
 
-The durable `finflow.events` topic exchange routes `ledger.transfer-completed.v1` to the existing notification queue. New events carry correlation and causation identifiers in the persisted payload.
+The durable `finflow.events` topic exchange routes `ledger.transfer-completed.v1` to the notification queue and, in secured mode, to a separate audit queue. New events carry correlation and causation identifiers in the persisted payload. Audit stores a minimal, append-only projection and deduplicates by event ID. The notification worker confirms a copy of a malformed delivery to its dead-letter queue before acknowledging the original.
 

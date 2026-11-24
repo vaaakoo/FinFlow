@@ -7,9 +7,24 @@ using RabbitMQ.Client;
 
 namespace FinFlow.Ledger.Api;
 
-public sealed class OutboxPublisher(IServiceScopeFactory scopes, ConnectionFactory broker,
-    ILogger<OutboxPublisher> logger) : BackgroundService
+public sealed class OutboxPublisher : BackgroundService
 {
+    private readonly IServiceScopeFactory scopes;
+    private readonly ConnectionFactory broker;
+    private readonly ILogger<OutboxPublisher> logger;
+    private readonly bool auditEnabled;
+
+    public OutboxPublisher(IServiceScopeFactory scopes,
+        ConnectionFactory broker,
+        IConfiguration configuration,
+        ILogger<OutboxPublisher> logger)
+    {
+        this.scopes = scopes;
+        this.broker = broker;
+        this.logger = logger;
+        auditEnabled = configuration.GetValue<bool>("RabbitMq:AuditEnabled");
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -44,6 +59,8 @@ public sealed class OutboxPublisher(IServiceScopeFactory scopes, ConnectionFacto
         await using var channel = await connection.CreateChannelAsync(new CreateChannelOptions(
             publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true), stoppingToken);
         await RabbitTopology.DeclareAsync(channel, stoppingToken);
+        if (auditEnabled)
+            await RabbitTopology.DeclareAuditQueueAsync(channel, stoppingToken);
 
         foreach (var message in pending)
         {

@@ -3,8 +3,15 @@ using Grpc.Core;
 
 namespace FinFlow.Ledger.Api;
 
-public sealed class LedgerPostingService(LedgerDb db) : LedgerPosting.LedgerPostingBase
+public sealed class LedgerPostingService : LedgerPosting.LedgerPostingBase
 {
+    private readonly LedgerDb db;
+
+    public LedgerPostingService(LedgerDb db)
+    {
+        this.db = db;
+    }
+
     public override async Task<PostingOutcome> Post(PostTransfer request, ServerCallContext context)
     {
         if (!Guid.TryParse(request.OperationId, out var operationId) || operationId == Guid.Empty
@@ -15,9 +22,10 @@ public sealed class LedgerPostingService(LedgerDb db) : LedgerPosting.LedgerPost
 
         var outcome = await Transfers.PostAsync(operationId.ToString(), "transfer-service", request.OwnerSubject,
             new TransferRequest(sourceId, destinationId, request.AmountMinor), db, context.CancellationToken);
-        return outcome.Transfer is { } transfer
-            ? new PostingOutcome { TransferId = transfer.Id.ToString() }
-            : new PostingOutcome { Rejection = outcome.Error! };
+        if (outcome.Transfer is null)
+            return new PostingOutcome { Rejection = outcome.Error! };
+
+        return new PostingOutcome { TransferId = outcome.Transfer.Id.ToString() };
     }
 }
 

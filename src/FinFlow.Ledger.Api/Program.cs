@@ -32,16 +32,8 @@ if (secured)
 }
 
 app.MapHealthChecks("/health/live");
-ledger.MapGet("/accounts", async (LedgerDb db, CancellationToken cancellationToken) =>
-    await db.Accounts.AsNoTracking().OrderBy(a => a.Id)
-        .Select(a => new { a.Id, a.Name, BalanceMinor = a.Balance, Currency = "GEL" })
-        .ToListAsync(cancellationToken));
-
-ledger.MapGet("/transfers/{id:guid}", async (Guid id, LedgerDb db, CancellationToken cancellationToken) =>
-    await db.Transfers.FindAsync([id], cancellationToken) is { } transfer
-        ? Results.Ok(transfer.Receipt)
-        : Results.NotFound());
-
+ledger.MapGet("/accounts", Accounts.List);
+ledger.MapGet("/transfers/{id:guid}", Transfers.Get);
 ledger.MapPost("/transfers", Transfers.Create);
 ledger.MapGet("/accounts/{accountId:guid}/statement", LedgerQueries.Statement);
 ledger.MapGet("/staff/ledger/reconciliation", LedgerQueries.Reconcile);

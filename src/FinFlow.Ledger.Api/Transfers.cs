@@ -4,6 +4,15 @@ namespace FinFlow.Ledger.Api;
 
 public static class Transfers
 {
+    public static async Task<IResult> Get(Guid id, LedgerDb db, CancellationToken token)
+    {
+        var transfer = await db.Transfers.FindAsync([id], token);
+        if (transfer is null)
+            return Results.NotFound();
+
+        return Results.Ok(transfer.Receipt);
+    }
+
     public static async Task<IResult> Create(HttpRequest http, TransferRequest request, LedgerDb db,
         CancellationToken cancellationToken)
     {
@@ -13,9 +22,11 @@ public static class Transfers
             return Results.BadRequest(new { error = "Supply one Idempotency-Key of 1–128 visible ASCII characters, excluding commas." });
 
         var outcome = await PostAsync(key, "http", null, request, db, cancellationToken);
-        return outcome.Transfer is { } transfer
-            ? Results.Created($"/transfers/{transfer.Id}", transfer.Receipt)
-            : Results.Json(new { error = outcome.Error }, statusCode: outcome.StatusCode);
+        if (outcome.Transfer is null)
+            return Results.Json(new { error = outcome.Error }, statusCode: outcome.StatusCode);
+
+        var transfer = outcome.Transfer;
+        return Results.Created($"/transfers/{transfer.Id}", transfer.Receipt);
     }
 
     internal static async Task<PostingResult> PostAsync(string key, string scope, string? owner,
