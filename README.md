@@ -2,7 +2,7 @@
 
 FinFlow is an MIT-licensed .NET 10 portfolio project for simulated GEL banking. The secured mode includes customer and staff portals, transfers, payment settlement and refunds, notifications, and auditing. The original transfer demo remains available on loopback.
 
-See the [current architecture](docs/architecture/current.md), [six-stage roadmap](PROJECT_PLAN.md), and [project status](PROJECT_STATUS.md).
+See the [implementation guide](docs/IMPLEMENTATION_GUIDE.md), [current architecture](docs/architecture/current.md), [six-stage roadmap](PROJECT_PLAN.md), and [project status](PROJECT_STATUS.md).
 
 ## Architecture
 

@@ -22,6 +22,11 @@
 
 ## Implementation guide
 
-- After all six stages are complete, write `docs/IMPLEMENTATION_GUIDE.md` in simple English. Explain each implemented technology and pattern, why FinFlow uses it, which service owns it, and how to demonstrate it.
+- Maintain `docs/IMPLEMENTATION_GUIDE.md` in simple English through release preparation. Explain each implemented technology and pattern, why FinFlow uses it, which service owns it, and how to demonstrate it.
 - Point to actual paths, classes, and methods for registration, authentication, account creation, transfers, payment simulation and recovery, RabbitMQ processing, real-time notifications, and distributed tracing. Mark any unverified behavior explicitly.
+
+## Low resource verification
+
+- Run Compose, Aspire, kind, and Testcontainers in separate sessions. Run one test suite at a time and stop its containers and background processes when it finishes.
+- Run frontend builds and dependency audits with Docker stopped. Obtain explicit approval before starting the full stack on this laptop.
 

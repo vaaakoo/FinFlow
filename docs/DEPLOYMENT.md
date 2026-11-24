@@ -1,5 +1,7 @@
 # Local deployment
 
+On a resource-constrained laptop, treat Compose, Aspire, kind, and Testcontainers as separate verification sessions. Stop the current stack and check `docker ps` before switching. Run the frontend build and dependency audits with Docker stopped. The [low-resource handoff](DEVELOPMENT_HANDOFF.md) starts with just Ledger and PostgreSQL. Use the full stack only after confirming the machine can handle it and obtaining approval.
+
 ## Aspire
 
 With .NET 10 and Docker running, start the backend and its development dependencies:
@@ -48,3 +50,29 @@ The [workflow](../.woodpecker.yaml) restores and audits NuGet dependencies, buil
 - Use the [secured smoke script](../tests/smoke-secure.mjs) for authenticated business flows and the [browser smoke script](../frontend/smoke-browser.mjs) for role-specific navigation.
 - Confirm the local gateway, portal, and database-backed readiness endpoints before recording deployment as verified.
 - Supply deployment-specific TLS, secrets, and storage before any environment shared with other users.
+
+### Low resource commands
+
+With Docker stopped, build the frontend and audit current dependencies:
+
+```powershell
+npm ci --prefix frontend
+npm audit --prefix frontend --omit=dev --audit-level=high
+npm run build --prefix frontend
+dotnet restore -p:NuGetAuditMode=all -warnaserror:NU1901,NU1902,NU1903,NU1904 -m:1
+dotnet build -c Release --no-restore -m:1
+```
+
+Start the Docker engine by itself for the first focused test. Check `docker ps` after starting it. A previous kind node can restart with Docker, so stop it before running tests if it appears. Stop Docker and confirm cleanup before restarting it for the second test. Stop it again after the second test.
+
+```powershell
+dotnet test -c Release --no-build --filter 'FullyQualifiedName~Audit_preserves_malformed_deliveries_and_processes_valid_events'
+```
+
+```powershell
+dotnet test -c Release --no-build --filter 'FullyQualifiedName~Broker_outage_preserves_transfer_and_recovery_handles_a_real_redelivery'
+```
+
+## Validation limits
+
+The earlier Aspire check reached its dashboard. Gateway readiness and the secured workflow under Aspire remain open. The earlier kind check started the control plane, followed by a Docker interruption before the workloads could be validated. The Woodpecker workflow requires a connected trusted runner. A dedicated Valkey outage check and a demonstration of the Polly circuit breaker opening also remain open. See the [implementation guide](IMPLEMENTATION_GUIDE.md) for the code paths already in place.
