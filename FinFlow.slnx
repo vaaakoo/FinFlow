@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FinFlow.Authentication/FinFlow.Authentication.csproj" />
+    <Project Path="src/FinFlow.Customers.Api/FinFlow.Customers.Api.csproj" />
+    <Project Path="src/FinFlow.Gateway/FinFlow.Gateway.csproj" />
+    <Project Path="src/FinFlow.Ledger.Api/FinFlow.Ledger.Api.csproj" />
+    <Project Path="src/FinFlow.Ledger.Contracts/FinFlow.Ledger.Contracts.csproj" />
+    <Project Path="src/FinFlow.Messaging/FinFlow.Messaging.csproj" />
+    <Project Path="src/FinFlow.Notifications.Worker/FinFlow.Notifications.Worker.csproj" />
+    <Project Path="src/FinFlow.Transfers.Api/FinFlow.Transfers.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FinFlow.Tests/FinFlow.Tests.csproj" />
+  </Folder>
+</Solution>

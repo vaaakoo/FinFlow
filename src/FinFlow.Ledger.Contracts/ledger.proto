@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+option csharp_namespace = "FinFlow.Ledger.Contracts";
+package finflow.ledger.v1;
+
+service LedgerPosting {
+  rpc Post (PostTransfer) returns (PostingOutcome);
+}
+
+message PostTransfer {
+  string operation_id = 1;
+  string owner_subject = 2;
+  string source_account_id = 3;
+  string destination_account_id = 4;
+  int64 amount_minor = 5;
+}
+
+message PostingOutcome {
+  string transfer_id = 1;
+  string rejection = 2;
+}
+

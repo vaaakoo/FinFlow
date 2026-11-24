@@ -1,0 +1,92 @@
+x-http-health: &http-health
+  test:
+    - CMD
+    - bash
+    - -ec
+    - >-
+      exec 3<>/dev/tcp/127.0.0.1/8080;
+      printf 'GET /health/live HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3;
+      grep -qm1 '^HTTP/1.1 200' <&3
+  interval: 2s
+  timeout: 3s
+  retries: 30
+
+x-api-identity: &api-identity
+  Identity__Issuer: http://localhost:${FINFLOW_IDENTITY_PORT:-8082}/realms/finflow
+  Identity__MetadataAddress: http://keycloak:8080/realms/finflow/.well-known/openid-configuration
+  Identity__AllowHttpMetadata: "true"
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.7
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_HOSTNAME: http://localhost:${FINFLOW_IDENTITY_PORT:-8082}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      FINFLOW_DEMO_PASSWORD: ${FINFLOW_DEMO_PASSWORD:-finflow-local-demo}
+      FINFLOW_TRANSFER_CLIENT_SECRET: ${FINFLOW_TRANSFER_CLIENT_SECRET:-finflow-local-transfer-client}
+    ports:
+      - "127.0.0.1:${FINFLOW_IDENTITY_PORT:-8082}:8080"
+    volumes:
+      - ./infrastructure/keycloak/finflow-realm.json:/opt/keycloak/data/import/finflow-realm.json:ro
+
+  ledger:
+    ports: !reset []
+    healthcheck: *http-health
+    environment:
+      <<: *api-identity
+      ASPNETCORE_HTTP_PORTS: ""
+      Kestrel__Endpoints__Http__Url: http://+:8080
+      Kestrel__Endpoints__Grpc__Url: http://+:8081
+      Kestrel__Endpoints__Grpc__Protocols: Http2
+      Identity__Enabled: "true"
+
+  customers:
+    healthcheck: *http-health
+    build:
+      context: .
+      target: customers
+    environment:
+      <<: *api-identity
+      ASPNETCORE_HTTP_PORTS: 8080
+      ConnectionStrings__Customers: "Host=postgres;Database=finflow_customers;Username=finflow;Password=${FINFLOW_POSTGRES_PASSWORD:-demo-postgres}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gateway:
+    healthcheck: *http-health
+    build:
+      context: .
+      target: gateway
+    environment:
+      <<: *api-identity
+      ASPNETCORE_HTTP_PORTS: 8080
+    ports:
+      - "127.0.0.1:${FINFLOW_GATEWAY_PORT:-8081}:8080"
+    depends_on:
+      customers:
+        condition: service_healthy
+      ledger:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+      transfers:
+        condition: service_healthy
+
+  transfers:
+    healthcheck: *http-health
+    build:
+      context: .
+      target: transfers
+    environment:
+      <<: *api-identity
+      ASPNETCORE_HTTP_PORTS: 8080
+      ConnectionStrings__Transfers: "Host=postgres;Database=finflow_transfers;Username=finflow;Password=${FINFLOW_POSTGRES_PASSWORD:-demo-postgres}"
+      LedgerPosting__Address: http://ledger:8081
+      LedgerPosting__TokenEndpoint: http://keycloak:8080/realms/finflow/protocol/openid-connect/token
+      LedgerPosting__ClientSecret: ${FINFLOW_TRANSFER_CLIENT_SECRET:-finflow-local-transfer-client}
+    depends_on:
+      postgres:
+        condition: service_healthy
+

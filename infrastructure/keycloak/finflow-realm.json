@@ -1,0 +1,181 @@
+{
+  "realm": "finflow",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "Customer"
+      },
+      {
+        "name": "Administrator"
+      },
+      {
+        "name": "BankOperator"
+      },
+      {
+        "name": "Auditor"
+      },
+      {
+        "name": "LedgerPoster"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "finflow-portal",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [
+        "http://localhost:4200/auth/callback",
+        "http://localhost:4200/"
+      ],
+      "webOrigins": [
+        "http://localhost:4200"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:4200/"
+      },
+      "protocolMappers": [
+        {
+          "name": "FinFlow API audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "finflow-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "FinFlow roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "finflow-transfers",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${FINFLOW_TRANSFER_CLIENT_SECRET}",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "FinFlow API audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "finflow-api",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "FinFlow roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-finflow-transfers",
+      "enabled": true,
+      "serviceAccountClientId": "finflow-transfers",
+      "realmRoles": ["LedgerPoster"]
+    },
+    {
+      "username": "customer",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Customer",
+      "lastName": "Demo",
+      "email": "customer@example.invalid",
+      "realmRoles": [
+        "Customer"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${FINFLOW_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Administrator",
+      "lastName": "Demo",
+      "email": "administrator@example.invalid",
+      "realmRoles": [
+        "Administrator"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${FINFLOW_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "operator",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "BankOperator",
+      "lastName": "Demo",
+      "email": "bankoperator@example.invalid",
+      "realmRoles": [
+        "BankOperator"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${FINFLOW_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "auditor",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Auditor",
+      "lastName": "Demo",
+      "email": "auditor@example.invalid",
+      "realmRoles": [
+        "Auditor"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${FINFLOW_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../FinFlow.Authentication/FinFlow.Authentication.csproj" />
+    <PackageReference Include="Yarp.ReverseProxy" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: finflow
+      POSTGRES_PASSWORD: ${FINFLOW_POSTGRES_PASSWORD:-demo-postgres}
+      POSTGRES_DB: finflow_ledger
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/init-databases.sql:/docker-entrypoint-initdb.d/10-notifications.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=\"$$POSTGRES_PASSWORD\" psql -h 127.0.0.1 -U finflow -d finflow_notifications -Atqc 'SELECT 1'"]
+      interval: 2s
+      timeout: 5s
+      retries: 25
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: finflow
+      RABBITMQ_DEFAULT_PASS: ${FINFLOW_RABBITMQ_PASSWORD:-demo-rabbitmq}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 3s
+      timeout: 10s
+      retries: 20
+
+  ledger:
+    build:
+      context: .
+      target: ledger
+    environment:
+      ASPNETCORE_HTTP_PORTS: 8080
+      ConnectionStrings__Ledger: "Host=postgres;Database=finflow_ledger;Username=finflow;Password=${FINFLOW_POSTGRES_PASSWORD:-demo-postgres}"
+      RabbitMq__Uri: "amqp://finflow:${FINFLOW_RABBITMQ_PASSWORD:-demo-rabbitmq}@rabbitmq:5672/"
+    ports:
+      - "127.0.0.1:${FINFLOW_API_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notifications:
+    build:
+      context: .
+      target: worker
+    environment:
+      ConnectionStrings__Notifications: "Host=postgres;Database=finflow_notifications;Username=finflow;Password=${FINFLOW_POSTGRES_PASSWORD:-demo-postgres}"
+      RabbitMq__Uri: "amqp://finflow:${FINFLOW_RABBITMQ_PASSWORD:-demo-rabbitmq}@rabbitmq:5672/"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+

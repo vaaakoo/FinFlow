@@ -1,0 +1,10 @@
+[Bb]in/
+[Oo]bj/
+.vs/
+TestResults/
+*.user
+*.suo
+.env
+.env.*
+!.env.example
+
