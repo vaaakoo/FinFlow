@@ -1,5 +1,14 @@
 # FinFlow
 
+**An event-driven digital banking and payments simulation for GEL**
+
+[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)](#technology-stack)
+[![Angular](https://img.shields.io/badge/Angular-21-DD0031?logo=angular&logoColor=white)](#technology-stack)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](#technology-stack)
+[![RabbitMQ](https://img.shields.io/badge/RabbitMQ-4-FF6600?logo=rabbitmq&logoColor=white)](#technology-stack)
+[![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](#start-the-demo)
+[![License MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
 FinFlow is an MIT-licensed .NET 10 portfolio project for simulated GEL banking. The secured mode includes customer and staff portals, transfers, payment settlement and refunds, notifications, and auditing. The original transfer demo remains available on loopback.
 
 See the [implementation guide](docs/IMPLEMENTATION_GUIDE.md), [current architecture](docs/architecture/current.md), [six-stage roadmap](PROJECT_PLAN.md), and [project status](PROJECT_STATUS.md).
